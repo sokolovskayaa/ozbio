@@ -1,26 +1,51 @@
 # ozbio — планировщик завода бурового оборудования (MVP)
 
-Жадный планировщик с сохранением в **`data/schedule.json`**. Старт подхватывает файл; каждый `POST /orders` перезаписывает его.
+Жадный планировщик с сохранением в **PostgreSQL** (Liquibase). Каждый `POST /orders` обновляет БД.
 
 Планирование **круглосуточно** (24/7). **Не в MVP:** смены, закрытие смены, overlap пакетов, симуляция времени, API статуса станка.
 
 ## Запуск
 
+### 1. PostgreSQL
+
+**Вариант A — локальный PostgreSQL (порт 5432):**
+
+```bash
+./scripts/setup-local-postgres.sh
+mvn spring-boot:run
+```
+
+Если ошибка `role "ozbio" does not exist` — сначала выполните `setup-local-postgres.sh`.
+
+**Вариант B — Docker (порт 5433 на хосте):**
+
+```bash
+docker compose up -d
+mvn spring-boot:run -Dspring-boot.run.profiles=docker
+```
+
+### 2. Приложение
+
 ```bash
 mvn spring-boot:run
 ```
 
-Порт **8080** (`application.properties`). Без файла создаётся `data/schedule.json` из шаблона.
+Порт **8080**. При старте Liquibase создаёт схему и демо-каталог (станки, справочник деталей, пустые заказы).
 
-**Сброс демо** (сервер остановлен):
+**Сброс демо** (очистить заказы, восстановить каталог):
 
 ```bash
-./scripts/reset-demo-data.sh
+./scripts/reset-demo-db.sh
+# перезапустите приложение
 ```
+
+Файл `data/schedule.json.example` — эталон для тестов и экспорта; приложение читает **БД**.
+
+Предупреждения `System::load` / `enable-native-access` на Java 22+ — не ошибка; в `pom.xml` уже добавлен `--enable-native-access=ALL-UNNAMED` для `spring-boot:run`.
 
 ## Справочник деталей
 
-В `data/schedule.json` → `partDefinitions`: **priority** и цепочка **tasks**.
+Таблицы `part_definition`, `part_task` (сиды в Liquibase `002-seed-demo-catalog.sql`).
 
 | partId | Приоритет | Технология (демо) |
 |--------|-----------|-------------------|
@@ -48,18 +73,6 @@ mvn spring-boot:run
 - `quantity` по умолчанию 1.
 - `createdAt` = системное время.
 
-### Правила планирования
-
-| Правило | Поведение |
-|---------|-----------|
-| Очередь заказов | FIFO по `createdAt` |
-| Приоритет детали | Внутри заказа (`partDefinitions.priority`) |
-| Штуки | Пакет по операциям: все штуки op.0, затем все op.1… |
-| Параллельность | Разные детали на разных станках, если не ухудшается более приоритетная деталь |
-| Между заказами | Новый заказ не увеличивает `readyAt` ранних |
-| Переналадка | Перед первой операцией и при смене `taskId` на станке |
-| Смены / overlap | **Не поддерживаются** в MVP |
-
 Подробно: [docs/правила-планировщика.md](docs/правила-планировщика.md).
 
 ## API
@@ -71,38 +84,23 @@ mvn spring-boot:run
 | GET | `/schedule?format=html` | HTML в браузере |
 | GET | `/schedule.html` | HTML (скачивание) |
 
-## HTML-интерфейс
-
-- Thymeleaf: `templates/schedule.html`
-- CSS/JS: `static/css/schedule.css`, `static/js/schedule-actions.js`, `static/js/schedule-filters.js`
-- Форма заказа, Gantt по станкам, фильтры, пресеты масштаба (День / Неделя…)
-
-Открыть: http://localhost:8080/schedule?format=html
-
 ## Демонстрация
 
-**Согласование с директором:** [docs/согласование-с-директором.md](docs/согласование-с-директором.md)
-
 ```bash
-./scripts/reset-demo-data.sh
-mvn spring-boot:run
+docker compose up -d
+mvn spring-boot:run -Dspring-boot.run.profiles=docker
+./scripts/reset-demo-db.sh
 ./scripts/prep-director-demo.sh
 open 'http://localhost:8080/schedule?format=html'
 ```
 
-Добавить заказ через curl:
+Сценарий встречи: [docs/согласование-с-директором.md](docs/согласование-с-директором.md).
 
-```bash
-curl -s -X POST http://localhost:8080/orders \
-  -H 'Content-Type: application/json; charset=utf-8' \
-  -d '{"orderId":"З-2026-0142","parts":[{"partId":"вал-буровой","quantity":8},{"partId":"корпус-бура","quantity":8}]}'
-```
+## Liquibase
 
-Скрипт `./scripts/demo.sh` сохраняет HTML; для интерактивной демо используйте браузер.
-
-## Группы станков и переналадка
-
-В `machineGroups`: `setupMinutes` по группе (`cnc` 30, `heavy` 45, `finish` 20). Окна смен (`workWindows`) **не используются**.
+- Master: `src/main/resources/db/changelog/db.changelog-master.yaml`
+- Схема: `changes/001-initial-schema.yaml`
+- Демо-данные: `changes/002-seed-demo-catalog.sql`
 
 ## Тесты
 
@@ -110,15 +108,14 @@ curl -s -X POST http://localhost:8080/orders \
 mvn test
 ```
 
-Матрица: [docs/тестирование.md](docs/тестирование.md).
+Unit-тесты используют `JsonScheduleRepository` (временный файл). Матрица: [docs/тестирование.md](docs/тестирование.md).
 
 ## Структура (основное)
 
 ```
 scheduler/
-  api/http/ScheduleController.java
-  api/view/SchedulePageRenderer.java, ScheduleHtmlRenderer.java
+  store/jdbc/JdbcScheduleRepository.java
+  store/ScheduleRepository.java
   engine/planning/GreedyScheduler.java
-  engine/metrics/OrderProgress.java, TaskReadiness.java
-  store/core/ScheduleStore.java, DemoFactoryCatalog.java, ScheduleSnapshotMapper.java
+  api/http/ScheduleController.java
 ```

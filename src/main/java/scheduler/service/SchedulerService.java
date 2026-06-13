@@ -16,7 +16,7 @@ import scheduler.model.order.Order;
 import scheduler.model.order.Part;
 import scheduler.model.schedule.SetupIntervals;
 import scheduler.model.order.Task;
-import scheduler.store.json.JsonScheduleRepository;
+import scheduler.store.ScheduleRepository;
 import scheduler.store.core.ScheduleStore;
 import scheduler.time.CurrentTimeProvider;
 import org.springframework.stereotype.Service;
@@ -24,12 +24,12 @@ import org.springframework.stereotype.Service;
 @Service
 public class SchedulerService {
     private final ScheduleStore store;
-    private final JsonScheduleRepository repository;
+    private final ScheduleRepository repository;
     private final CurrentTimeProvider time;
     private final GreedyScheduler scheduler;
 
     public SchedulerService(
-            ScheduleStore store, JsonScheduleRepository repository, CurrentTimeProvider time) {
+            ScheduleStore store, ScheduleRepository repository, CurrentTimeProvider time) {
         this.store = store;
         this.repository = repository;
         this.time = time;

@@ -27,6 +27,7 @@ import scheduler.model.schedule.SetupIntervals;
 import scheduler.service.AddOrderResult;
 import scheduler.service.SchedulerService;
 import scheduler.service.SchedulingException;
+import scheduler.store.ScheduleRepository;
 import scheduler.store.json.JsonScheduleRepository;
 import scheduler.store.core.PartDefinition;
 import scheduler.store.core.ScheduleStore;
@@ -46,7 +47,7 @@ class GreedySchedulerTest {
         factoryStart = Instant.parse("2026-05-22T08:00:00Z");
         store = ScheduleStore.empty(factoryStart);
         seedPartCatalog(store);
-        JsonScheduleRepository repository = new JsonScheduleRepository(tempDir.resolve("schedule.json"));
+        ScheduleRepository repository = new JsonScheduleRepository(tempDir.resolve("schedule.json"));
         service = new SchedulerService(store, repository, new FixedTimeProvider(factoryStart));
     }
 

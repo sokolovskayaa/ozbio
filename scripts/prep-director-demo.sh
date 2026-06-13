@@ -11,8 +11,10 @@ echo ""
 
 if ! curl -sf "$BASE/schedule" >/dev/null; then
   echo "ОШИБКА: сервер не отвечает на $BASE" >&2
-  echo "  1. ./scripts/reset-demo-data.sh  (сервер остановлен)" >&2
-  echo "  2. mvn spring-boot:run" >&2
+  echo "  1. PostgreSQL:" >&2
+  echo "     ./scripts/setup-local-postgres.sh   # локальный Postgres" >&2
+  echo "     или docker compose up -d            # Docker на порту 5433" >&2
+  echo "  2. mvn spring-boot:run  (для Docker: -Dspring-boot.run.profiles=docker)" >&2
   echo "  3. снова: $0" >&2
   exit 1
 fi
@@ -33,11 +35,9 @@ if [[ "$ORDERS" != "0" ]]; then
 fi
 
 DISK_ORDERS=""
-DISK_FACTORY=""
 if [[ -f "$ROOT/data/schedule.json" ]]; then
   DISK_ORDERS="$($JQ '(.orders // []) | length' "$ROOT/data/schedule.json")"
-  DISK_FACTORY="$($JQ -r '.factoryStartedAt // empty' "$ROOT/data/schedule.json")"
-  echo "Заказов в data/schedule.json: $DISK_ORDERS"
+  echo "Заказов в data/schedule.json (legacy): $DISK_ORDERS"
 fi
 echo ""
 
@@ -47,9 +47,9 @@ if [[ "$ORDERS" != "0" ]]; then
   echo "ПРЕДУПРЕЖДЕНИЕ: в API $ORDERS заказ(ов) — для «живого» сценария нужен 0 после reset." >&2
   if [[ -n "$DISK_ORDERS" && "$DISK_ORDERS" == "0" ]]; then
     echo "  В файле заказов 0 — сервер держит старые данные в памяти." >&2
-    echo "  Остановите сервер → ./scripts/reset-demo-data.sh → mvn spring-boot:run" >&2
+    echo "  Остановите сервер → ./scripts/reset-demo-db.sh → mvn spring-boot:run" >&2
   else
-    echo "  Сброс: остановите сервер → ./scripts/reset-demo-data.sh → mvn spring-boot:run" >&2
+    echo "  Сброс: ./scripts/reset-demo-db.sh → перезапуск сервера" >&2
   fi
   FAIL=1
 fi
@@ -57,10 +57,6 @@ fi
 EXPECTED_FACTORY="2026-05-22T08:00:00Z"
 if [[ -n "$FACTORY" && "$FACTORY" != "$EXPECTED_FACTORY" ]]; then
   echo "ПРЕДУПРЕЖДЕНИЕ: factoryStartedAt=$FACTORY (ожидался $EXPECTED_FACTORY после reset)." >&2
-  FAIL=1
-fi
-if [[ -n "$DISK_FACTORY" && "$DISK_FACTORY" != "$EXPECTED_FACTORY" ]]; then
-  echo "ПРЕДУПРЕЖДЕНИЕ: в файле factoryStartedAt=$DISK_FACTORY." >&2
   FAIL=1
 fi
 

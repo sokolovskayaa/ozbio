@@ -1,0 +1,9 @@
+databaseChangeLog:
+  - changeSet:
+      id: 002-seed-demo-catalog
+      author: ozbio
+      changes:
+        - sqlFile:
+            path: 002-seed-demo-catalog.sql
+            relativeToChangelogFile: true
+            splitStatements: true

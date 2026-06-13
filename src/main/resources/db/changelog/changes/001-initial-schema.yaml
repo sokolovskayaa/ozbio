@@ -1,0 +1,320 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-factory-state
+      author: ozbio
+      changes:
+        - createTable:
+            tableName: factory_state
+            columns:
+              - column:
+                  name: id
+                  type: smallint
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: factory_started_at
+                  type: timestamptz
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 001-machine-group
+      author: ozbio
+      changes:
+        - createTable:
+            tableName: machine_group
+            columns:
+              - column:
+                  name: group_id
+                  type: varchar(64)
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: name
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: setup_minutes
+                  type: int
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 001-machine
+      author: ozbio
+      changes:
+        - createTable:
+            tableName: machine
+            columns:
+              - column:
+                  name: machine_id
+                  type: varchar(64)
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: group_id
+                  type: varchar(64)
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_machine_group
+                    references: machine_group(group_id)
+              - column:
+                  name: available_at
+                  type: timestamptz
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: varchar(32)
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 001-machine-capability
+      author: ozbio
+      changes:
+        - createTable:
+            tableName: machine_capability
+            columns:
+              - column:
+                  name: machine_id
+                  type: varchar(64)
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_capability_machine
+                    references: machine(machine_id)
+              - column:
+                  name: capability
+                  type: varchar(32)
+                  constraints:
+                    nullable: false
+        - addPrimaryKey:
+            tableName: machine_capability
+            columnNames: machine_id, capability
+            constraintName: pk_machine_capability
+
+  - changeSet:
+      id: 001-part-definition
+      author: ozbio
+      changes:
+        - createTable:
+            tableName: part_definition
+            columns:
+              - column:
+                  name: part_id
+                  type: varchar(128)
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: priority
+                  type: int
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 001-part-task
+      author: ozbio
+      changes:
+        - createTable:
+            tableName: part_task
+            columns:
+              - column:
+                  name: part_id
+                  type: varchar(128)
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_part_task_definition
+                    references: part_definition(part_id)
+              - column:
+                  name: task_id
+                  type: varchar(128)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: sequence
+                  type: int
+                  constraints:
+                    nullable: false
+              - column:
+                  name: duration_seconds
+                  type: bigint
+                  constraints:
+                    nullable: false
+              - column:
+                  name: required_capability
+                  type: varchar(32)
+                  constraints:
+                    nullable: false
+        - addPrimaryKey:
+            tableName: part_task
+            columnNames: part_id, task_id
+            constraintName: pk_part_task
+
+  - changeSet:
+      id: 001-schedule-order
+      author: ozbio
+      changes:
+        - createTable:
+            tableName: schedule_order
+            columns:
+              - column:
+                  name: order_id
+                  type: varchar(64)
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: created_at
+                  type: timestamptz
+                  constraints:
+                    nullable: false
+              - column:
+                  name: priority
+                  type: int
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 001-order-part
+      author: ozbio
+      changes:
+        - createTable:
+            tableName: order_part
+            columns:
+              - column:
+                  name: order_id
+                  type: varchar(64)
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_order_part_order
+                    references: schedule_order(order_id)
+              - column:
+                  name: part_id
+                  type: varchar(128)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: quantity
+                  type: int
+                  constraints:
+                    nullable: false
+        - addPrimaryKey:
+            tableName: order_part
+            columnNames: order_id, part_id
+            constraintName: pk_order_part
+
+  - changeSet:
+      id: 001-order-part-task
+      author: ozbio
+      changes:
+        - createTable:
+            tableName: order_part_task
+            columns:
+              - column:
+                  name: order_id
+                  type: varchar(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: part_id
+                  type: varchar(128)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: task_id
+                  type: varchar(128)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: sequence
+                  type: int
+                  constraints:
+                    nullable: false
+              - column:
+                  name: duration_seconds
+                  type: bigint
+                  constraints:
+                    nullable: false
+              - column:
+                  name: required_capability
+                  type: varchar(32)
+                  constraints:
+                    nullable: false
+        - addPrimaryKey:
+            tableName: order_part_task
+            columnNames: order_id, part_id, task_id
+            constraintName: pk_order_part_task
+        - addForeignKeyConstraint:
+            baseTableName: order_part_task
+            baseColumnNames: order_id, part_id
+            referencedTableName: order_part
+            referencedColumnNames: order_id, part_id
+            constraintName: fk_order_part_task_order_part
+
+  - changeSet:
+      id: 001-assignment
+      author: ozbio
+      changes:
+        - createTable:
+            tableName: assignment
+            columns:
+              - column:
+                  name: assignment_id
+                  type: varchar(64)
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: order_id
+                  type: varchar(64)
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_assignment_order
+                    references: schedule_order(order_id)
+              - column:
+                  name: part_id
+                  type: varchar(128)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: unit_index
+                  type: int
+                  constraints:
+                    nullable: false
+              - column:
+                  name: task_id
+                  type: varchar(128)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: sequence
+                  type: int
+                  constraints:
+                    nullable: false
+              - column:
+                  name: machine_id
+                  type: varchar(64)
+                  constraints:
+                    nullable: false
+                    foreignKeyName: fk_assignment_machine
+                    references: machine(machine_id)
+              - column:
+                  name: planned_start
+                  type: timestamptz
+                  constraints:
+                    nullable: false
+              - column:
+                  name: planned_end
+                  type: timestamptz
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: varchar(32)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: actual_start
+                  type: timestamptz
+              - column:
+                  name: actual_end
+                  type: timestamptz

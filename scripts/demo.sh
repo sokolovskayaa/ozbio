@@ -53,9 +53,14 @@ http_ok() {
 }
 
 if [[ "${RESET_DEMO:-0}" == "1" ]]; then
-  section "0. Сброс data/schedule.json"
+  section "0. Сброс демо"
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-  "$SCRIPT_DIR/reset-demo-data.sh"
+  if command -v docker >/dev/null 2>&1 && docker compose -f "$SCRIPT_DIR/../docker-compose.yml" ps --status running postgres 2>/dev/null | grep -q postgres; then
+    "$SCRIPT_DIR/reset-demo-db.sh"
+  else
+    "$SCRIPT_DIR/reset-demo-data.sh"
+    echo "Для PostgreSQL: docker compose up -d && ./scripts/reset-demo-db.sh"
+  fi
   echo "Перезапустите сервер, затем снова запустите demo.sh"
   exit 0
 fi
