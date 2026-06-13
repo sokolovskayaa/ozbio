@@ -9,7 +9,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import scheduler.engine.machine.MachineStateSync;
 import scheduler.engine.machine.MachineTimeline;
 import scheduler.engine.metrics.OrderProgress;
 import scheduler.engine.metrics.TaskReadiness;
@@ -17,13 +16,12 @@ import scheduler.engine.policy.PartPriorities;
 import scheduler.model.schedule.Assignment;
 import scheduler.model.schedule.AssignmentStatus;
 import scheduler.model.machine.Machine;
-import scheduler.model.machine.MachineGroup;
 import scheduler.model.order.Order;
 import scheduler.model.order.Part;
 import scheduler.model.schedule.SetupIntervals;
 import scheduler.model.order.Task;
 import scheduler.service.SchedulingException;
-import scheduler.store.core.ScheduleStore;
+import scheduler.store.PlanningRepository;
 import scheduler.time.CurrentTimeProvider;
 
 public class GreedyScheduler {
@@ -33,29 +31,37 @@ public class GreedyScheduler {
         this.time = time;
     }
 
-    public void scheduleOrder(Order targetOrder, ScheduleStore store) {
-        MachineStateSync.sync(store, time.now());
+    public void scheduleOrder(Order targetOrder, PlanningRepository repo, List<Assignment> sessionAssignments)
+            throws java.io.IOException {
+        repo.syncOperationalMachines(time.now());
+        Instant factoryStartedAt = repo.factoryStartedAt();
 
+        Map<String, Integer> partPriorities = new LinkedHashMap<>();
+        for (Part part : targetOrder.parts()) {
+            partPriorities.put(part.partId(), PartPriorities.of(repo, part.partId()));
+        }
         List<Part> partsByPriority = targetOrder.parts().stream()
-                .sorted(Comparator.comparingInt((Part p) -> PartPriorities.of(store, p.partId()))
-                        .reversed())
+                .sorted(Comparator.comparingInt((Part p) -> partPriorities.get(p.partId())).reversed())
                 .toList();
 
-        while (!isOrderFullyScheduled(targetOrder, store)) {
+        while (!isOrderFullyScheduled(targetOrder, sessionAssignments)) {
             boolean progressed = false;
 
-            Optional<WorkCandidate> primary = nextPrimaryCandidate(targetOrder, partsByPriority, store);
+            Optional<WorkCandidate> primary = nextPrimaryCandidate(
+                    targetOrder, partsByPriority, sessionAssignments, factoryStartedAt);
             if (primary.isPresent()) {
-                Optional<PlannedWork> planned = findBestPlannedWork(primary.get(), store);
+                Optional<PlannedWork> planned = findBestPlannedWork(primary.get(), repo, sessionAssignments, factoryStartedAt);
                 if (planned.isPresent()
-                        && isAllowedForEarlierOrders(primary.get(), planned.get(), store)
-                        && isAllowedWithinOrder(primary.get(), planned.get(), store)) {
-                    commitPlannedWork(planned.get(), store);
+                        && isAllowedForEarlierOrders(primary.get(), planned.get(), repo)
+                        && isAllowedWithinOrder(
+                                primary.get(), planned.get(), repo, sessionAssignments, factoryStartedAt)) {
+                    commitPlannedWork(planned.get(), repo, sessionAssignments);
                     progressed = true;
                 }
             }
 
-            if (!progressed && tryAssignParallelLowerPriority(targetOrder, partsByPriority, store)) {
+            if (!progressed && tryAssignParallelLowerPriority(
+                    targetOrder, partsByPriority, repo, sessionAssignments, factoryStartedAt)) {
                 progressed = true;
             }
 
@@ -66,9 +72,9 @@ public class GreedyScheduler {
         }
     }
 
-    private static boolean isOrderFullyScheduled(Order order, ScheduleStore store) {
+    private static boolean isOrderFullyScheduled(Order order, List<Assignment> assignments) {
         for (Part part : order.parts()) {
-            if (!TaskReadiness.isPartFullyScheduled(order.orderId(), part, store.assignments())) {
+            if (!TaskReadiness.isPartFullyScheduled(order.orderId(), part, assignments)) {
                 return false;
             }
         }
@@ -76,13 +82,16 @@ public class GreedyScheduler {
     }
 
     private Optional<WorkCandidate> nextPrimaryCandidate(
-            Order order, List<Part> partsByPriority, ScheduleStore store) {
+            Order order,
+            List<Part> partsByPriority,
+            List<Assignment> assignments,
+            Instant factoryStartedAt) {
         for (Part part : partsByPriority) {
-            if (TaskReadiness.isPartFullyScheduled(order.orderId(), part, store.assignments())) {
+            if (TaskReadiness.isPartFullyScheduled(order.orderId(), part, assignments)) {
                 continue;
             }
-            Instant orderStart = OrderProgress.orderStart(order, store, time);
-            Optional<ReadyWork> ready = TaskReadiness.readyWork(order, part, store.assignments(), orderStart, store);
+            Instant orderStart = OrderProgress.orderStart(order, factoryStartedAt, time);
+            Optional<ReadyWork> ready = TaskReadiness.readyWork(order, part, assignments, orderStart);
             if (ready.isEmpty()) {
                 continue;
             }
@@ -93,38 +102,47 @@ public class GreedyScheduler {
     }
 
     private boolean tryAssignParallelLowerPriority(
-            Order order, List<Part> partsByPriority, ScheduleStore store) {
-        Instant orderStart = OrderProgress.orderStart(order, store, time);
+            Order order,
+            List<Part> partsByPriority,
+            PlanningRepository repo,
+            List<Assignment> assignments,
+            Instant factoryStartedAt) throws java.io.IOException {
+        Instant orderStart = OrderProgress.orderStart(order, factoryStartedAt, time);
         List<Part> byAscPriority = partsByPriority.reversed();
         for (Part part : byAscPriority) {
-            if (TaskReadiness.isPartFullyScheduled(order.orderId(), part, store.assignments())) {
+            if (TaskReadiness.isPartFullyScheduled(order.orderId(), part, assignments)) {
                 continue;
             }
-            Optional<ReadyWork> ready = TaskReadiness.readyWork(order, part, store.assignments(), orderStart, store);
+            Optional<ReadyWork> ready = TaskReadiness.readyWork(order, part, assignments, orderStart);
             if (ready.isEmpty()) {
                 continue;
             }
             WorkCandidate candidate =
                     new WorkCandidate(order, part, ready.get().unitIndex(), ready.get().task());
-            Optional<PlannedWork> planned = findBestPlannedWork(candidate, store);
+            Optional<PlannedWork> planned = findBestPlannedWork(candidate, repo, assignments, factoryStartedAt);
             if (planned.isPresent()
-                    && isAllowedWithinOrder(candidate, planned.get(), store)
-                    && isAllowedForEarlierOrders(candidate, planned.get(), store)) {
-                commitPlannedWork(planned.get(), store);
+                    && isAllowedWithinOrder(candidate, planned.get(), repo, assignments, factoryStartedAt)
+                    && isAllowedForEarlierOrders(candidate, planned.get(), repo)) {
+                commitPlannedWork(planned.get(), repo, assignments);
                 return true;
             }
         }
         return false;
     }
 
-    private boolean isAllowedWithinOrder(WorkCandidate candidate, PlannedWork planned, ScheduleStore store) {
+    private boolean isAllowedWithinOrder(
+            WorkCandidate candidate,
+            PlannedWork planned,
+            PlanningRepository repo,
+            List<Assignment> assignments,
+            Instant factoryStartedAt) throws java.io.IOException {
         Order order = candidate.order();
-        int candidatePriority = PartPriorities.of(store, candidate.part().partId());
-        Instant orderStart = OrderProgress.orderStart(order, store, time);
+        int candidatePriority = PartPriorities.of(repo, candidate.part().partId());
+        Instant orderStart = OrderProgress.orderStart(order, factoryStartedAt, time);
         Map<String, Instant> before = higherPriorityPartReadyAts(
-                order, candidatePriority, store.assignments(), orderStart, store);
+                order, candidatePriority, repo, assignments, orderStart);
 
-        List<Assignment> withNew = append(store.assignments(), planned);
+        List<Assignment> withNew = append(assignments, planned);
         for (Map.Entry<String, Instant> entry : before.entrySet()) {
             Instant after = partReadyAtOrStart(
                     order.orderId(), entry.getKey(), withNew, orderStart);
@@ -138,12 +156,12 @@ public class GreedyScheduler {
     private Map<String, Instant> higherPriorityPartReadyAts(
             Order order,
             int candidatePriority,
+            PlanningRepository repo,
             List<Assignment> assignments,
-            Instant orderStart,
-            ScheduleStore store) {
+            Instant orderStart) throws java.io.IOException {
         Map<String, Instant> map = new LinkedHashMap<>();
         for (Part part : order.parts()) {
-            if (PartPriorities.of(store, part.partId()) > candidatePriority) {
+            if (PartPriorities.of(repo, part.partId()) > candidatePriority) {
                 map.put(
                         part.partId(),
                         partReadyAtOrStart(order.orderId(), part.partId(), assignments, orderStart));
@@ -162,14 +180,17 @@ public class GreedyScheduler {
                 .orElse(orderStart);
     }
 
-    private boolean isAllowedForEarlierOrders(WorkCandidate candidate, PlannedWork planned, ScheduleStore store) {
-        for (Order other : store.orders()) {
-            if (other.priority() <= candidate.order().priority()) {
-                continue;
-            }
-            Instant before = currentReadyAt(other.orderId(), store);
-            List<Assignment> withNew = append(store.assignments(), planned);
-            Instant after = OrderProgress.readyAt(other.orderId(), withNew);
+    private boolean isAllowedForEarlierOrders(
+            WorkCandidate candidate, PlannedWork planned, PlanningRepository repo) throws java.io.IOException {
+        for (Order other : repo.ordersWithPriorityAbove(candidate.order().priority())) {
+            Instant before = repo.orderReadyAt(other.orderId()).orElse(repo.factoryStartedAt());
+            List<Assignment> withNew = append(repo.assignmentsForOrder(other.orderId()), planned);
+            Optional<Instant> afterOpt = withNew.stream()
+                    .filter(a -> a.orderId().equals(other.orderId()))
+                    .filter(a -> a.status() != AssignmentStatus.CANCELLED)
+                    .map(Assignment::effectiveEnd)
+                    .max(Comparator.naturalOrder());
+            Instant after = afterOpt.orElse(repo.factoryStartedAt());
             if (after.isAfter(before)) {
                 return false;
             }
@@ -177,10 +198,14 @@ public class GreedyScheduler {
         return true;
     }
 
-    private Optional<PlannedWork> findBestPlannedWork(WorkCandidate candidate, ScheduleStore store) {
+    private Optional<PlannedWork> findBestPlannedWork(
+            WorkCandidate candidate,
+            PlanningRepository repo,
+            List<Assignment> assignments,
+            Instant factoryStartedAt) throws java.io.IOException {
         PlannedWork best = null;
-        for (Machine machine : capableMachines(candidate.task(), store)) {
-            Optional<PlannedWork> tentative = planWork(candidate, machine, store);
+        for (Machine machine : repo.findOperationalMachines(candidate.task().requiredCapability())) {
+            Optional<PlannedWork> tentative = planWork(candidate, machine, repo, assignments, factoryStartedAt);
             if (tentative.isEmpty()) {
                 continue;
             }
@@ -195,24 +220,28 @@ public class GreedyScheduler {
         return Optional.ofNullable(best);
     }
 
-    private Optional<PlannedWork> planWork(WorkCandidate candidate, Machine machine, ScheduleStore store) {
+    private Optional<PlannedWork> planWork(
+            WorkCandidate candidate,
+            Machine machine,
+            PlanningRepository repo,
+            List<Assignment> assignments,
+            Instant factoryStartedAt) throws java.io.IOException {
         Order order = candidate.order();
         Part part = candidate.part();
         Task task = candidate.task();
         int unitIndex = candidate.unitIndex();
 
-        Instant orderStart = OrderProgress.orderStart(order, store, time);
+        Instant orderStart = OrderProgress.orderStart(order, factoryStartedAt, time);
         Instant prevEnd = TaskReadiness.previousTaskEnd(
                 order,
                 part,
                 unitIndex,
                 task.sequence(),
-                store.assignments(),
+                assignments,
                 orderStart,
-                store,
                 machine.machineId());
-        Duration setup = SetupPlanner.setupBeforeTask(machine, part.partId(), task.taskId(), store);
-        Instant machineAvailable = MachineTimeline.availableFrom(store, machine.machineId(), time.now());
+        Duration setup = SetupPlanner.setupBeforeTask(machine, part.partId(), task.taskId(), repo);
+        Instant machineAvailable = MachineTimeline.availableFrom(repo, machine.machineId(), time.now());
         Instant anchor = max(prevEnd, orderStart, machineAvailable);
 
         Optional<WorkTiming> timing = planWorkTiming(anchor, setup, task.duration());
@@ -260,32 +289,23 @@ public class GreedyScheduler {
                 Optional.of(setupStart), Optional.of(setupEnd), workStart, workEnd));
     }
 
-    private void commitPlannedWork(PlannedWork planned, ScheduleStore store) {
-        planned.setup().ifPresent(store::addAssignment);
-        commitAssignment(planned.work(), store);
-    }
-
-    private void commitAssignment(Assignment assignment, ScheduleStore store) {
-        store.addAssignment(assignment);
-        store.updateMachineAvailability(assignment.machineId(), assignment.plannedEnd());
-    }
-
-    private List<Machine> capableMachines(Task task, ScheduleStore store) {
-        return store.machines().stream()
-                .filter(Machine::isOperational)
-                .filter(m -> m.canPerform(task.requiredCapability()))
-                .sorted(Comparator.comparing(Machine::availableAt))
-                .toList();
-    }
-
-    private Instant currentReadyAt(String orderId, ScheduleStore store) {
-        List<Assignment> existing = store.assignments().stream()
-                .filter(a -> a.orderId().equals(orderId))
-                .toList();
-        if (existing.isEmpty()) {
-            return store.factoryStartedAt();
+    private void commitPlannedWork(
+            PlannedWork planned, PlanningRepository repo, List<Assignment> sessionAssignments)
+            throws java.io.IOException {
+        if (planned.setup().isPresent()) {
+            Assignment setup = planned.setup().get();
+            repo.insertAssignment(setup);
+            sessionAssignments.add(setup);
+            repo.updateMachineAvailableAt(setup.machineId(), setup.plannedEnd());
         }
-        return OrderProgress.readyAt(orderId, existing);
+        commitAssignment(planned.work(), repo, sessionAssignments);
+    }
+
+    private void commitAssignment(Assignment assignment, PlanningRepository repo, List<Assignment> sessionAssignments)
+            throws java.io.IOException {
+        repo.insertAssignment(assignment);
+        sessionAssignments.add(assignment);
+        repo.updateMachineAvailableAt(assignment.machineId(), assignment.plannedEnd());
     }
 
     private static Instant max(Instant... values) {

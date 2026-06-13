@@ -3,6 +3,7 @@ package scheduler.engine.planning;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,58 +12,52 @@ import scheduler.model.schedule.Assignment;
 import scheduler.model.schedule.AssignmentStatus;
 import scheduler.model.machine.Machine;
 import scheduler.model.machine.MachineGroupDefaults;
-import scheduler.store.core.ScheduleStore;
+import scheduler.store.InMemoryPlanningRepository;
 
 class SetupPlannerTest {
-    private ScheduleStore store;
+    private InMemoryPlanningRepository repo;
     private Machine milling;
     private Machine turning;
 
     @BeforeEach
     void setUp() {
         Instant t = Instant.parse("2026-05-22T08:00:00Z");
-        store = ScheduleStore.empty(t);
-        milling = store.machines().stream()
-                .filter(m -> m.machineId().equals("ФРЕЗ-ЧПУ-01"))
-                .findFirst()
-                .orElseThrow();
-        turning = store.machines().stream()
-                .filter(m -> m.machineId().equals("ТОКАР-ЧПУ-02"))
-                .findFirst()
-                .orElseThrow();
+        repo = new InMemoryPlanningRepository(t);
+        milling = repo.machine("ФРЕЗ-ЧПУ-01");
+        turning = repo.machine("ТОКАР-ЧПУ-02");
     }
 
     @Test
-    void setupBeforeTask_firstWorkOnMachine_usesGroupDefault() {
-        Duration setup = SetupPlanner.setupBeforeTask(milling, "корпус-бура", "черновая-фрезеровка", store);
+    void setupBeforeTask_firstWorkOnMachine_usesGroupDefault() throws IOException {
+        Duration setup = SetupPlanner.setupBeforeTask(milling, "корпус-бура", "черновая-фрезеровка", repo);
         assertEquals(MachineGroupDefaults.setupDuration("cnc"), setup);
     }
 
     @Test
-    void setupBeforeTask_samePartAndTaskAgain_noSetup() {
-        store.addAssignment(workAssignment("корпус-бура", "черновая-фрезеровка", milling.machineId()));
-        Duration setup = SetupPlanner.setupBeforeTask(milling, "корпус-бура", "черновая-фрезеровка", store);
+    void setupBeforeTask_samePartAndTaskAgain_noSetup() throws IOException {
+        repo.addAssignment(workAssignment("корпус-бура", "черновая-фрезеровка", milling.machineId()));
+        Duration setup = SetupPlanner.setupBeforeTask(milling, "корпус-бура", "черновая-фрезеровка", repo);
         assertTrue(setup.isZero());
     }
 
     @Test
-    void setupBeforeTask_samePartDifferentTask_needsSetup() {
-        store.addAssignment(workAssignment("вал-буровой", "черновая-токарка", turning.machineId()));
-        Duration setup = SetupPlanner.setupBeforeTask(turning, "вал-буровой", "чистовая-токарка", store);
+    void setupBeforeTask_samePartDifferentTask_needsSetup() throws IOException {
+        repo.addAssignment(workAssignment("вал-буровой", "черновая-токарка", turning.machineId()));
+        Duration setup = SetupPlanner.setupBeforeTask(turning, "вал-буровой", "чистовая-токарка", repo);
         assertEquals(Duration.ofMinutes(30), setup);
     }
 
     @Test
-    void setupBeforeTask_differentPart_usesGroupDefault() {
-        store.addAssignment(workAssignment("корпус-бура", "черновая-фрезеровка", milling.machineId()));
-        Duration setup = SetupPlanner.setupBeforeTask(milling, "вал-буровой", "черновая-фрезеровка", store);
+    void setupBeforeTask_differentPart_usesGroupDefault() throws IOException {
+        repo.addAssignment(workAssignment("корпус-бура", "черновая-фрезеровка", milling.machineId()));
+        Duration setup = SetupPlanner.setupBeforeTask(milling, "вал-буровой", "черновая-фрезеровка", repo);
         assertEquals(Duration.ofMinutes(30), setup);
     }
 
     @Test
-    void setupBeforeTask_ignoresCancelledLaterDifferentTaskOnMachine() {
+    void setupBeforeTask_ignoresCancelledLaterDifferentTaskOnMachine() throws IOException {
         Instant t = Instant.parse("2026-05-22T08:00:00Z");
-        store.addAssignment(Assignment.planned(
+        repo.addAssignment(Assignment.planned(
                 "done",
                 "Z-1",
                 "вал-буровой",
@@ -72,7 +67,7 @@ class SetupPlannerTest {
                 turning.machineId(),
                 t,
                 t.plus(Duration.ofMinutes(30))));
-        store.addAssignment(new Assignment(
+        repo.addAssignment(new Assignment(
                 "cancelled",
                 "Z-1",
                 "вал-буровой",
@@ -86,7 +81,7 @@ class SetupPlannerTest {
                 null,
                 null));
 
-        Duration setup = SetupPlanner.setupBeforeTask(turning, "вал-буровой", "черновая-токарка", store);
+        Duration setup = SetupPlanner.setupBeforeTask(turning, "вал-буровой", "черновая-токарка", repo);
         assertTrue(setup.isZero(), "отменённая чистовая не должна требовать переналадку перед продолжением черновой");
     }
 

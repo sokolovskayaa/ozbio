@@ -61,6 +61,8 @@ run_psql -c "GRANT ALL PRIVILEGES ON DATABASE ozbio TO ozbio;"
 run_psql -d ozbio <<'SQL'
 CREATE SCHEMA IF NOT EXISTS testing;
 CREATE SCHEMA IF NOT EXISTS production;
+ALTER SCHEMA testing OWNER TO ozbio;
+ALTER SCHEMA production OWNER TO ozbio;
 GRANT ALL ON SCHEMA testing TO ozbio;
 GRANT ALL ON SCHEMA production TO ozbio;
 ALTER DEFAULT PRIVILEGES IN SCHEMA testing GRANT ALL ON TABLES TO ozbio;

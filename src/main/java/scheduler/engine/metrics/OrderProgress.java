@@ -5,7 +5,6 @@ import java.util.Comparator;
 import java.util.List;
 import scheduler.model.schedule.Assignment;
 import scheduler.model.order.Order;
-import scheduler.store.core.ScheduleStore;
 import scheduler.time.CurrentTimeProvider;
 
 /** Сроки готовности заказов и деталей. */
@@ -28,10 +27,9 @@ public final class OrderProgress {
                 .orElseThrow(() -> new IllegalStateException("No assignments for part " + partId));
     }
 
-    public static Instant orderStart(Order order, ScheduleStore store, CurrentTimeProvider time) {
-        Instant base = order.createdAt().isBefore(store.factoryStartedAt())
-                ? store.factoryStartedAt()
-                : order.createdAt();
+    public static Instant orderStart(
+            Order order, Instant factoryStartedAt, CurrentTimeProvider time) {
+        Instant base = order.createdAt().isBefore(factoryStartedAt) ? factoryStartedAt : order.createdAt();
         Instant now = time.now();
         return base.isBefore(now) ? now : base;
     }

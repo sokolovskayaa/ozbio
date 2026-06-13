@@ -2,36 +2,41 @@ package scheduler.service;
 
 import java.io.IOException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import scheduler.api.dto.OrderRequest;
 import scheduler.api.view.ScheduleView;
 import scheduler.api.view.ScheduleViewBuilder;
-import scheduler.engine.machine.MachineStateSync;
 import scheduler.engine.metrics.OrderProgress;
 import scheduler.engine.metrics.TaskReadiness;
-import scheduler.engine.planning.GreedyScheduler;
 import scheduler.engine.policy.FactoryZone;
 import scheduler.engine.policy.OrderIds;
 import scheduler.engine.policy.OrderPriorities;
+import scheduler.engine.planning.GreedyScheduler;
 import scheduler.model.order.Order;
 import scheduler.model.order.Part;
 import scheduler.model.order.Task;
 import scheduler.model.schedule.Assignment;
 import scheduler.model.schedule.SetupIntervals;
-import scheduler.store.ScheduleRepository;
-import scheduler.store.core.ScheduleStore;
+import scheduler.store.PlanningRepository;
+import scheduler.store.ScheduleQueryRepository;
 import scheduler.time.CurrentTimeProvider;
 
 @Service
 public class SchedulerService {
-    private final ScheduleRepository repository;
+    private final ScheduleQueryRepository queryRepository;
+    private final PlanningRepository planningRepository;
     private final CurrentTimeProvider time;
     private final GreedyScheduler scheduler;
 
-    public SchedulerService(ScheduleRepository repository, CurrentTimeProvider time) {
-        this.repository = repository;
+    public SchedulerService(
+            ScheduleQueryRepository queryRepository,
+            PlanningRepository planningRepository,
+            CurrentTimeProvider time) {
+        this.queryRepository = queryRepository;
+        this.planningRepository = planningRepository;
         this.time = time;
         this.scheduler = new GreedyScheduler(time);
     }
@@ -41,43 +46,36 @@ public class SchedulerService {
     }
 
     public ScheduleView buildScheduleView() throws IOException {
-        ScheduleStore store = loadSyncedState();
-        return ScheduleViewBuilder.build(store, time);
+        return ScheduleViewBuilder.build(queryRepository.loadScheduleData(), time);
     }
 
     @Transactional
     public synchronized AddOrderResult addOrder(OrderRequest request) throws IOException {
-        ScheduleStore store = loadSyncedState();
-        OrderValidator.validatePartIds(request, store);
-        var parts = request.parts().stream()
-                .map(line -> store.createPart(line.partId(), line.resolvedQuantity()))
-                .toList();
+        OrderValidator.validatePartIds(request, planningRepository);
+        List<Part> parts = new ArrayList<>();
+        for (var line : request.parts()) {
+            parts.add(new Part(
+                    line.partId(),
+                    line.resolvedQuantity(),
+                    planningRepository.partTasks(line.partId())));
+        }
         Instant createdAt = time.now();
-        String orderId = resolveOrderId(request.orderId(), createdAt, store);
+        String orderId = resolveOrderId(request.orderId(), createdAt);
         Order order = new Order(orderId, createdAt, parts, OrderPriorities.fromCreatedAt(createdAt));
-        OrderValidator.validate(order, store);
+        OrderValidator.validate(order, planningRepository);
 
-        store.addOrder(order);
-        scheduler.scheduleOrder(order, store);
-        verifyOrderFullyScheduled(order, store);
-        repository.persistOrderScheduling(store, order.orderId());
+        planningRepository.insertOrder(order);
+        List<Assignment> sessionAssignments = new ArrayList<>();
+        scheduler.scheduleOrder(order, planningRepository, sessionAssignments);
+        verifyOrderFullyScheduled(order, sessionAssignments);
 
-        List<Assignment> forOrder = store.assignments().stream()
-                .filter(a -> a.orderId().equals(order.orderId()))
-                .toList();
         return new AddOrderResult(
-                order.orderId(), OrderProgress.readyAt(order.orderId(), forOrder), forOrder);
+                order.orderId(), OrderProgress.readyAt(order.orderId(), sessionAssignments), sessionAssignments);
     }
 
-    private ScheduleStore loadSyncedState() throws IOException {
-        ScheduleStore store = repository.loadState();
-        MachineStateSync.sync(store, time.now());
-        return store;
-    }
-
-    private void verifyOrderFullyScheduled(Order order, ScheduleStore store) {
+    private void verifyOrderFullyScheduled(Order order, List<Assignment> assignments) {
         for (Part part : order.parts()) {
-            if (!TaskReadiness.isPartFullyScheduled(order.orderId(), part, store.assignments())) {
+            if (!TaskReadiness.isPartFullyScheduled(order.orderId(), part, assignments)) {
                 throw new SchedulingException(
                         "Incomplete schedule for part " + part.partId() + " in order " + order.orderId());
             }
@@ -86,7 +84,7 @@ public class SchedulerService {
                     continue;
                 }
                 int scheduled = TaskReadiness.unitsScheduledForTask(
-                        order.orderId(), part.partId(), task.taskId(), store.assignments());
+                        order.orderId(), part.partId(), task.taskId(), assignments);
                 if (scheduled < part.quantity()) {
                     throw new SchedulingException(
                             "Task "
@@ -101,11 +99,11 @@ public class SchedulerService {
         }
     }
 
-    private String resolveOrderId(String requestedId, Instant createdAt, ScheduleStore store) {
+    private String resolveOrderId(String requestedId, Instant createdAt) throws IOException {
         if (requestedId != null && !requestedId.isBlank()) {
             return requestedId.trim();
         }
-        List<String> existing = store.orders().stream().map(Order::orderId).toList();
+        List<String> existing = planningRepository.listOrderIds();
         return OrderIds.nextOrderId(createdAt, FactoryZone.ZONE, existing);
     }
 }

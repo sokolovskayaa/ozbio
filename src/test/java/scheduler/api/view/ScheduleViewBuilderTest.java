@@ -13,20 +13,21 @@ import scheduler.model.machine.Capability;
 import scheduler.model.order.Order;
 import scheduler.model.order.Part;
 import scheduler.model.order.Task;
+import scheduler.store.InMemoryPlanningRepository;
+import scheduler.store.ScheduleData;
 import scheduler.store.core.PartDefinition;
-import scheduler.store.core.ScheduleStore;
 import scheduler.time.FixedTimeProvider;
 
 class ScheduleViewBuilderTest {
     @Test
-    void build_excludesCancelledAssignments() {
+    void build_excludesCancelledAssignments() throws java.io.IOException {
         Instant factory = Instant.parse("2026-05-22T08:00:00Z");
-        ScheduleStore store = ScheduleStore.empty(factory);
-        store.setPartDefinition(
+        InMemoryPlanningRepository repo = new InMemoryPlanningRepository(factory);
+        repo.putPartDefinition(
                 "P1",
                 new PartDefinition(
                         1, List.of(new Task("T1", 0, Duration.ofMinutes(10), Capability.MILLING))));
-        store.addOrder(new Order(
+        repo.addOrder(new Order(
                 "O1",
                 factory,
                 List.of(new Part(
@@ -34,9 +35,9 @@ class ScheduleViewBuilderTest {
                         2,
                         List.of(new Task("T1", 0, Duration.ofMinutes(10), Capability.MILLING)))),
                 1));
-        store.addAssignment(Assignment.planned(
+        repo.addAssignment(Assignment.planned(
                 "a1", "O1", "P1", 0, "T1", 0, "ФРЕЗ-ЧПУ-01", factory, factory.plus(Duration.ofMinutes(10))));
-        store.addAssignment(new Assignment(
+        repo.addAssignment(new Assignment(
                 "a2",
                 "O1",
                 "P1",
@@ -50,7 +51,8 @@ class ScheduleViewBuilderTest {
                 null,
                 null));
 
-        ScheduleView view = ScheduleViewBuilder.build(store, new FixedTimeProvider(factory));
+        ScheduleData data = repo.loadScheduleData();
+        ScheduleView view = ScheduleViewBuilder.build(data, new FixedTimeProvider(factory));
         long inView = view.orders().stream()
                 .flatMap(o -> o.parts().stream())
                 .flatMap(p -> p.assignments().stream())

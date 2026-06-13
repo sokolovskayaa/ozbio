@@ -15,7 +15,6 @@ import scheduler.model.order.Task;
 import scheduler.model.machine.Capability;
 import scheduler.model.order.Order;
 import scheduler.engine.policy.OrderPriorities;
-import scheduler.store.core.ScheduleStore;
 
 class ScheduleMetricsTest {
     @Test
@@ -40,7 +39,6 @@ class ScheduleMetricsTest {
     @Test
     void previousTaskEnd_usesActualEndForCompleted() {
         Instant factory = Instant.parse("2026-05-22T08:00:00Z");
-        ScheduleStore store = ScheduleStore.empty(factory);
         Part part = new Part("P1", 2, List.of(new Task("T1", 0, Duration.ofMinutes(10), Capability.MILLING)));
         Order order = new Order("O1", factory, List.of(part), OrderPriorities.fromCreatedAt(factory));
         Assignment unit0 = new Assignment(
@@ -49,14 +47,13 @@ class ScheduleMetricsTest {
                 AssignmentStatus.COMPLETED,
                 factory, factory.plus(Duration.ofMinutes(30)));
         Instant prev =
-                TaskReadiness.previousTaskEnd(order, part, 1, 0, List.of(unit0), factory, store, "M1");
+                TaskReadiness.previousTaskEnd(order, part, 1, 0, List.of(unit0), factory, "M1");
         assertEquals(factory.plus(Duration.ofMinutes(30)), prev);
     }
 
     @Test
     void isTaskReady_finishMillingBlockedUntilAllRoughMillingPlanned_onSharedMachine() {
         Instant factory = Instant.parse("2026-05-22T08:00:00Z");
-        ScheduleStore store = ScheduleStore.empty(factory);
         Task rough = new Task("черновая-фрезеровка", 0, Duration.ofMinutes(90), Capability.MILLING);
         Task boring = new Task("расточивание-отверстий", 1, Duration.ofMinutes(120), Capability.DEEP_BORING);
         Task finish = new Task("чистовая-фрезеровка", 2, Duration.ofMinutes(60), Capability.MILLING);
@@ -86,7 +83,7 @@ class ScheduleMetricsTest {
                         factory.plus(Duration.ofHours(4))));
 
         assertFalse(
-                TaskReadiness.isTaskReady(order, part, 0, finish, assignments, factory, store),
+                TaskReadiness.isTaskReady(order, part, 0, finish, assignments, factory),
                 "чистовая на том же ФРЕЗ: нужна вся партия черновой, не только расточка шт.0");
     }
 }

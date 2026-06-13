@@ -40,9 +40,6 @@ build/
 ### Local compile libs (when Maven unavailable) ###
 lib/
 
-### Runtime schedule (use schedule.json.example as template) ###
-data/schedule.json
-
 ### Generated demo HTML ###
 schedule-demo.html
 

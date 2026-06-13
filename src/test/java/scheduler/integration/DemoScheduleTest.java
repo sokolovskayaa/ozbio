@@ -4,24 +4,22 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import scheduler.api.dto.OrderPartRequest;
 import scheduler.api.dto.OrderRequest;
 import scheduler.engine.metrics.OrderProgress;
 import scheduler.engine.metrics.TaskReadiness;
 import scheduler.model.schedule.Assignment;
 import scheduler.model.schedule.SetupIntervals;
-import java.util.Comparator;
 import scheduler.service.AddOrderResult;
 import scheduler.service.SchedulerService;
-import scheduler.store.json.JsonScheduleRepository;
+import scheduler.store.InMemoryPlanningRepository;
+import scheduler.store.TestFactoryFixtures;
 import scheduler.time.FixedTimeProvider;
 
 /**
@@ -37,20 +35,15 @@ class DemoScheduleTest {
     /** Минимум календарного интервала черновой токарки (8×70 мин). */
     private static final Duration MIN_ROUGH_TURNING_SPAN = Duration.ofHours(9);
 
-    @TempDir
-    Path tempDir;
-
     private SchedulerService service;
     private Instant factoryStart;
 
     @BeforeEach
-    void setUp() throws IOException {
-        Path example = Path.of("data/schedule.json.example");
-        Path scheduleFile = tempDir.resolve("schedule.json");
-        Files.copy(example, scheduleFile);
-        JsonScheduleRepository repository = new JsonScheduleRepository(scheduleFile);
-        factoryStart = repository.factoryStartedAt();
-        service = new SchedulerService(repository, new FixedTimeProvider(factoryStart));
+    void setUp() {
+        factoryStart = Instant.parse("2026-05-22T08:00:00Z");
+        InMemoryPlanningRepository repository = new InMemoryPlanningRepository(factoryStart);
+        TestFactoryFixtures.seedDemoCatalog(repository);
+        service = new SchedulerService(repository, repository, new FixedTimeProvider(factoryStart));
     }
 
     @Test

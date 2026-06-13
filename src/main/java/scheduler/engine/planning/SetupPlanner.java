@@ -1,14 +1,11 @@
 package scheduler.engine.planning;
 
 import java.time.Duration;
-import java.util.Comparator;
 import java.util.Optional;
-import scheduler.engine.metrics.AssignmentFilters;
 import scheduler.model.schedule.Assignment;
 import scheduler.model.machine.Machine;
 import scheduler.model.machine.MachineGroup;
-import scheduler.model.schedule.SetupIntervals;
-import scheduler.store.core.ScheduleStore;
+import scheduler.store.PlanningRepository;
 
 public final class SetupPlanner {
     private SetupPlanner() {}
@@ -18,16 +15,13 @@ public final class SetupPlanner {
      * {@code taskId} (тип операции), либо станок пуст — длительность из группы; иначе 0.
      */
     public static Duration setupBeforeTask(
-            Machine machine, String partId, String taskId, ScheduleStore store) {
-        MachineGroup group = store.findGroupForMachine(machine).orElse(null);
-        Duration setup = group != null ? group.setupDuration() : Duration.ZERO;
+            Machine machine, String partId, String taskId, PlanningRepository repo) throws java.io.IOException {
+        Optional<MachineGroup> group = repo.groupForMachine(machine.machineId());
+        Duration setup = group.isPresent() ? group.get().setupDuration() : Duration.ZERO;
         if (setup.isZero()) {
             return Duration.ZERO;
         }
-        Optional<Assignment> last = AssignmentFilters.work(store.assignments()).stream()
-                .filter(a -> a.machineId().equals(machine.machineId()))
-                .filter(a -> a.isCompleted() || a.isPlanned())
-                .max(Comparator.comparing(Assignment::effectiveEnd));
+        Optional<Assignment> last = repo.lastWorkOnMachine(machine.machineId());
         if (last.isEmpty()) {
             return setup;
         }

@@ -8,13 +8,14 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import scheduler.engine.metrics.AssignmentFilters;
+import scheduler.store.ScheduleData;
 import scheduler.store.core.PartDefinition;
 import scheduler.engine.metrics.OrderProgress;
-import scheduler.model.schedule.Assignment;
+import scheduler.model.machine.Machine;
 import scheduler.model.machine.MachineGroup;
+import scheduler.model.schedule.Assignment;
 import scheduler.model.order.Order;
 import scheduler.model.order.Part;
-import scheduler.store.core.ScheduleStore;
 import scheduler.time.CurrentTimeProvider;
 
 public final class ScheduleViewBuilder {
@@ -23,15 +24,15 @@ public final class ScheduleViewBuilder {
 
     private ScheduleViewBuilder() {}
 
-    public static ScheduleView build(ScheduleStore store, CurrentTimeProvider time) {
-        List<MachineGroupView> groups = store.machineGroups().values().stream()
+    public static ScheduleView build(ScheduleData data, CurrentTimeProvider time) {
+        List<MachineGroupView> groups = data.machineGroups().values().stream()
                 .sorted(Comparator.comparing(MachineGroup::groupId))
                 .map(g -> new MachineGroupView(g.groupId(), g.name(), g.setupDuration().toString()))
                 .toList();
 
-        List<MachineView> machines = store.machines().stream()
+        List<MachineView> machines = data.machines().stream()
                 .map(m -> {
-                    MachineGroup group = store.findGroupForMachine(m).orElse(null);
+                    MachineGroup group = data.machineGroups().get(m.groupId());
                     String groupName = group != null ? group.name() : m.groupId();
                     return new MachineView(
                             m.machineId(),
@@ -44,8 +45,8 @@ public final class ScheduleViewBuilder {
                 .toList();
 
         List<OrderScheduleView> orders = new ArrayList<>();
-        for (Order order : store.orders()) {
-            List<Assignment> orderAssignments = AssignmentFilters.active(store.assignments()).stream()
+        for (Order order : data.orders()) {
+            List<Assignment> orderAssignments = AssignmentFilters.active(data.assignments()).stream()
                     .filter(a -> a.orderId().equals(order.orderId()))
                     .toList();
             if (orderAssignments.isEmpty()) {
@@ -64,10 +65,12 @@ public final class ScheduleViewBuilder {
                 Instant partReady = OrderProgress.partReadyAt(
                         order.orderId(), part.partId(), orderAssignments);
                 long slackMinutes = Duration.between(partReady, orderReady).toMinutes();
+                PartDefinition def = data.catalog().get(part.partId());
+                int priority = def != null ? def.priority() : 0;
                 parts.add(new PartScheduleView(
                         part.partId(),
                         part.quantity(),
-                        store.partPriority(part.partId()),
+                        priority,
                         partReady,
                         slackMinutes,
                         partAssignments.stream().map(ScheduleViewBuilder::toAssignmentView).toList()));
@@ -76,13 +79,13 @@ public final class ScheduleViewBuilder {
                     order.orderId(), order.createdAt(), order.priority(), orderReady, parts));
         }
 
-        List<PartCatalogView> catalog = store.partDefinitions().entrySet().stream()
+        List<PartCatalogView> catalog = data.catalog().entrySet().stream()
                 .sorted((a, b) -> Integer.compare(b.getValue().priority(), a.getValue().priority()))
                 .map(e -> toCatalogView(e.getKey(), e.getValue()))
                 .toList();
         Instant now = time.now();
         return new ScheduleView(
-                store.factoryStartedAt(),
+                data.factoryStartedAt(),
                 new ClockView(false, now),
                 now,
                 catalog,

@@ -11,7 +11,6 @@ import scheduler.model.order.Order;
 import scheduler.model.order.Part;
 import scheduler.model.order.Task;
 import scheduler.engine.planning.ReadyWork;
-import scheduler.store.core.ScheduleStore;
 
 /** Готовность операций и прогресс планирования по штукам. */
 public final class TaskReadiness {
@@ -85,7 +84,7 @@ public final class TaskReadiness {
     }
 
     public static Optional<ReadyWork> readyWork(
-            Order order, Part part, List<Assignment> assignments, Instant orderStart, ScheduleStore store) {
+            Order order, Part part, List<Assignment> assignments, Instant orderStart) {
         for (int unit = 0; unit < part.quantity(); unit++) {
             for (Task task : part.tasks()) {
                 if (isWorkTaskDone(order.orderId(), part, unit, task.taskId(), assignments)) {
@@ -94,7 +93,7 @@ public final class TaskReadiness {
                 if (hasPlannedWork(order.orderId(), part.partId(), unit, task.taskId(), assignments)) {
                     continue;
                 }
-                if (isTaskReady(order, part, unit, task, assignments, orderStart, store)) {
+                if (isTaskReady(order, part, unit, task, assignments, orderStart)) {
                     return Optional.of(new ReadyWork(unit, task));
                 }
                 break;
@@ -109,9 +108,8 @@ public final class TaskReadiness {
             int unitIndex,
             Task task,
             List<Assignment> assignments,
-            Instant orderStart,
-            ScheduleStore store) {
-        if (!isEarlierSameMachineBatchComplete(order, part, task, assignments, store)) {
+            Instant orderStart) {
+        if (!isEarlierSameMachineBatchComplete(order, part, task, assignments)) {
             return false;
         }
         if (task.sequence() > 0) {
@@ -133,7 +131,6 @@ public final class TaskReadiness {
             int sequence,
             List<Assignment> assignments,
             Instant orderStart,
-            ScheduleStore store,
             String targetMachineId) {
         Instant routeConstraint = previousTaskEndFromRoute(
                 order, part, unitIndex, sequence, assignments, orderStart);
@@ -173,8 +170,8 @@ public final class TaskReadiness {
         return endOfUnitOperation(order.orderId(), part.partId(), unitIndex - 1, 0, assignments);
     }
 
-  private static boolean isEarlierSameMachineBatchComplete(
-            Order order, Part part, Task task, List<Assignment> assignments, ScheduleStore store) {
+    private static boolean isEarlierSameMachineBatchComplete(
+            Order order, Part part, Task task, List<Assignment> assignments) {
         for (Task earlier : part.tasks()) {
             if (earlier.sequence() >= task.sequence()) {
                 continue;

@@ -5,12 +5,16 @@ import java.util.List;
 import scheduler.model.machine.Capability;
 import scheduler.model.order.Task;
 
-/** Справочник деталей по умолчанию для JSON-репозитория (unit-тесты без PostgreSQL). */
+/** Справочник деталей для демо-каталога (Liquibase seed и unit-тесты). */
 public final class CatalogSeeder {
     private CatalogSeeder() {}
 
-    public static void seedPartDefinitions(ScheduleStore store) {
-        store.setPartDefinition(
+    public interface PartCatalogSink {
+        void setPartDefinition(String partId, PartDefinition definition);
+    }
+
+    public static void seedPartDefinitions(PartCatalogSink sink) {
+        sink.setPartDefinition(
                 "корпус-бура",
                 new PartDefinition(
                         10,
@@ -18,7 +22,7 @@ public final class CatalogSeeder {
                                 new Task("черновая-фрезеровка", 0, Duration.ofMinutes(90), Capability.MILLING),
                                 new Task("расточивание-отверстий", 1, Duration.ofMinutes(120), Capability.DEEP_BORING),
                                 new Task("чистовая-фрезеровка", 2, Duration.ofMinutes(60), Capability.MILLING))));
-        store.setPartDefinition(
+        sink.setPartDefinition(
                 "вал-буровой",
                 new PartDefinition(
                         8,
@@ -26,21 +30,21 @@ public final class CatalogSeeder {
                                 new Task("черновая-токарка", 0, Duration.ofMinutes(70), Capability.TURNING),
                                 new Task("чистовая-токарка", 1, Duration.ofMinutes(45), Capability.TURNING),
                                 new Task("шлифование-сегментов", 2, Duration.ofMinutes(50), Capability.GRINDING))));
-        store.setPartDefinition(
+        sink.setPartDefinition(
                 "гидроблок",
                 new PartDefinition(
                         5,
                         List.of(
                                 new Task("фрезерование-плоскостей", 0, Duration.ofMinutes(55), Capability.MILLING),
                                 new Task("сверление-гидроканалов", 1, Duration.ofMinutes(40), Capability.DEEP_BORING))));
-        store.setPartDefinition(
+        sink.setPartDefinition(
                 "муфта-зажимная",
                 new PartDefinition(
                         3,
                         List.of(
                                 new Task("токарка-муфты", 0, Duration.ofMinutes(35), Capability.TURNING),
                                 new Task("сварка-шва-MIG", 1, Duration.ofMinutes(25), Capability.WELDING))));
-        store.setPartDefinition(
+        sink.setPartDefinition(
                 "ниппель-соединительный",
                 new PartDefinition(
                         4,

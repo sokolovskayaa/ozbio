@@ -5,8 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZonedDateTime;
@@ -14,7 +12,6 @@ import java.util.List;
 import scheduler.engine.policy.FactoryZone;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import scheduler.api.dto.OrderPartRequest;
 import scheduler.api.dto.OrderRequest;
 import scheduler.engine.policy.OrderPriorities;
@@ -22,69 +19,27 @@ import scheduler.engine.metrics.OrderProgress;
 import scheduler.model.order.Order;
 import scheduler.model.order.Part;
 import scheduler.model.machine.Capability;
-import scheduler.model.machine.MachineStatus;
 import scheduler.model.schedule.SetupIntervals;
 import scheduler.service.AddOrderResult;
 import scheduler.service.SchedulerService;
 import scheduler.service.SchedulingException;
-import scheduler.store.json.JsonScheduleRepository;
+import scheduler.store.InMemoryPlanningRepository;
+import scheduler.store.TestFactoryFixtures;
 import scheduler.store.core.PartDefinition;
-import scheduler.store.core.ScheduleStore;
 import scheduler.model.order.Task;
 import scheduler.time.FixedTimeProvider;
 
 class GreedySchedulerTest {
-    @TempDir
-    Path tempDir;
-
-    private JsonScheduleRepository repository;
+    private InMemoryPlanningRepository repository;
     private SchedulerService service;
     private Instant factoryStart;
 
     @BeforeEach
-    void setUp() throws IOException {
+    void setUp() {
         factoryStart = Instant.parse("2026-05-22T08:00:00Z");
-        repository = new JsonScheduleRepository(tempDir.resolve("schedule.json"));
-        ScheduleStore initial = ScheduleStore.empty(factoryStart);
-        seedPartCatalog(initial);
-        repository.writeState(initial);
-        service = new SchedulerService(repository, new FixedTimeProvider(factoryStart));
-    }
-
-    private void replaceState(ScheduleStore store) throws IOException {
-        repository.writeState(store);
-    }
-
-    private static void seedPartCatalog(ScheduleStore store) {
-        store.setPartDefinition(
-                "P1",
-                new PartDefinition(
-                        10,
-                        List.of(
-                                new Task("T1", 0, Duration.ofMinutes(60), Capability.MILLING),
-                                new Task("T2", 1, Duration.ofMinutes(30), Capability.TURNING))));
-        store.setPartDefinition(
-                "P-high",
-                new PartDefinition(10, List.of(new Task("T1", 0, Duration.ofMinutes(100), Capability.MILLING))));
-        store.setPartDefinition(
-                "P-low",
-                new PartDefinition(5, List.of(new Task("T2", 0, Duration.ofMinutes(40), Capability.TURNING))));
-        store.setPartDefinition(
-                "P-slow",
-                new PartDefinition(10, List.of(new Task("T1", 0, Duration.ofMinutes(80), Capability.MILLING))));
-        store.setPartDefinition(
-                "P-fast",
-                new PartDefinition(5, List.of(new Task("T2", 0, Duration.ofMinutes(20), Capability.TURNING))));
-        store.setPartDefinition(
-                "P2",
-                new PartDefinition(5, List.of(new Task("T2", 0, Duration.ofMinutes(30), Capability.MILLING))));
-        store.setPartDefinition(
-                "P-overlap",
-                new PartDefinition(
-                        8,
-                        List.of(
-                                new Task("T-mill", 0, Duration.ofMinutes(20), Capability.MILLING),
-                                new Task("T-turn", 1, Duration.ofMinutes(10), Capability.TURNING))));
+        repository = new InMemoryPlanningRepository(factoryStart);
+        TestFactoryFixtures.seedGreedySchedulerCatalog(repository);
+        service = new SchedulerService(repository, repository, new FixedTimeProvider(factoryStart));
     }
 
     private static OrderPartRequest line(String partId) {
@@ -97,14 +52,12 @@ class GreedySchedulerTest {
 
     @Test
     void addOrder_machineBusyUntilLate_startsAfterAvailability() throws IOException {
-        ScheduleStore state = repository.loadState();
-        state.setPartDefinition(
+        repository.putPartDefinition(
                 "P-tail",
                 new PartDefinition(10, List.of(new Task("T1", 0, Duration.ofMinutes(70), Capability.MILLING))));
         Instant lateFriday =
                 ZonedDateTime.of(2026, 5, 22, 19, 30, 0, 0, FactoryZone.ZONE).toInstant();
-        state.findMachine("ФРЕЗ-ЧПУ-01").setAvailableAt(lateFriday);
-        replaceState(state);
+        repository.machine("ФРЕЗ-ЧПУ-01").setAvailableAt(lateFriday);
 
         AddOrderResult result = service.addOrder(new OrderRequest("O1", List.of(line("P-tail"))));
 
@@ -118,13 +71,11 @@ class GreedySchedulerTest {
 
     @Test
     void addOrder_withoutOrderId_assignsNextNumber() throws IOException {
-        ScheduleStore state = repository.loadState();
-        state.addOrder(new scheduler.model.order.Order(
+        repository.addOrder(new Order(
                 "З-2026-0005",
                 factoryStart,
-                List.of(state.createPart("P1", 1)),
+                List.of(new Part("P1", 1, repository.partTasks("P1"))),
                 1));
-        replaceState(state);
         AddOrderResult result = service.addOrder(new OrderRequest(null, List.of(line("P1"))));
 
         assertEquals("З-2026-0006", result.orderId());
@@ -137,7 +88,6 @@ class GreedySchedulerTest {
         assertEquals("O1", result.orderId());
         assertEquals(4, result.assignmentsForOrder().size());
         assertEquals(factoryStart.plus(Duration.ofMinutes(150)), result.readyAt());
-        assertTrue(Files.exists(tempDir.resolve("schedule.json")));
     }
 
     @Test

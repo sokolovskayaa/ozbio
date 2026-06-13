@@ -2,7 +2,7 @@ package scheduler.model.order;
 
 import java.util.List;
 
-/** Приоритет детали задаётся в {@code partPriorities} при старте (см. {@code ScheduleStore}). */
+/** Приоритет детали задаётся в каталоге {@code part_definition} (БД / DemoFactoryCatalog). */
 public record Part(String partId, int quantity, List<Task> tasks) {
     public Part {
         if (quantity < 1) {

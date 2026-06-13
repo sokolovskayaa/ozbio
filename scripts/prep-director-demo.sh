@@ -34,23 +34,13 @@ if [[ "$ORDERS" != "0" ]]; then
   echo "  id: $($JQ -r '[.orders[].orderId] | join(", ")' "$TMP")"
 fi
 
-DISK_ORDERS=""
-if [[ -f "$ROOT/data/schedule.json" ]]; then
-  DISK_ORDERS="$($JQ '(.orders // []) | length' "$ROOT/data/schedule.json")"
-  echo "Заказов в data/schedule.json (legacy): $DISK_ORDERS"
-fi
 echo ""
 
 FAIL=0
 
 if [[ "$ORDERS" != "0" ]]; then
   echo "ПРЕДУПРЕЖДЕНИЕ: в API $ORDERS заказ(ов) — для «живого» сценария нужен 0 после reset." >&2
-  if [[ -n "$DISK_ORDERS" && "$DISK_ORDERS" == "0" ]]; then
-    echo "  В файле заказов 0 — сервер держит старые данные в памяти." >&2
-    echo "  Остановите сервер → ./scripts/reset-demo-db.sh → mvn spring-boot:run" >&2
-  else
-    echo "  Сброс: ./scripts/reset-demo-db.sh → перезапуск сервера" >&2
-  fi
+  echo "  Сброс: ./scripts/reset-demo-db.sh → перезапуск сервера" >&2
   FAIL=1
 fi
 
