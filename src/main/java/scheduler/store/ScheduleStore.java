@@ -1,9 +1,7 @@
 package scheduler.store;
 
-import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -11,39 +9,27 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import scheduler.model.Assignment;
-import scheduler.model.AssignmentStatus;
-import scheduler.model.MachineBlock;
 import scheduler.model.Capability;
 import scheduler.model.Machine;
 import scheduler.model.MachineGroup;
 import scheduler.model.MachineGroupDefaults;
 import scheduler.model.MachineStatus;
-import scheduler.engine.AssignmentFilters;
 import scheduler.engine.OrderPriorities;
 import scheduler.model.Order;
-import scheduler.model.SetupIntervals;
 import scheduler.model.Part;
 import scheduler.model.Task;
-import scheduler.model.WorkWindow;
 
 public class ScheduleStore {
     private Instant factoryStartedAt;
-    private boolean simulationClockEnabled;
-    private Instant simulationCurrentTime;
     private final List<Order> orders = new ArrayList<>();
     private final List<Assignment> assignments = new ArrayList<>();
-    private final List<MachineBlock> machineBlocks = new ArrayList<>();
     private final List<Machine> machines = new ArrayList<>();
     private final Map<String, MachineGroup> machineGroups = new LinkedHashMap<>();
     private final Map<String, PartDefinition> partDefinitions = new LinkedHashMap<>();
-    private final Map<String, Instant> lastClosedShiftEndByGroup = new LinkedHashMap<>();
-    private boolean overlapBatchesEnabled = false;
 
-    public static ScheduleStore empty(Instant factoryStartedAt, boolean simulationEnabled, Instant simulationTime) {
+    public static ScheduleStore empty(Instant factoryStartedAt) {
         ScheduleStore store = new ScheduleStore();
         store.factoryStartedAt = factoryStartedAt;
-        store.simulationClockEnabled = simulationEnabled;
-        store.simulationCurrentTime = simulationTime;
         store.machineGroups.putAll(defaultMachineGroups());
         store.machines.addAll(defaultMachines(factoryStartedAt));
         return store;
@@ -52,11 +38,6 @@ public class ScheduleStore {
     public static ScheduleStore fromSnapshot(ScheduleSnapshot snapshot) {
         ScheduleStore store = new ScheduleStore();
         store.factoryStartedAt = snapshot.factoryStartedAt;
-        var clock = snapshot.simulationClock;
-        store.simulationClockEnabled = clock == null || clock.enabled;
-        store.simulationCurrentTime = clock != null && clock.currentTime != null
-                ? clock.currentTime
-                : snapshot.factoryStartedAt;
         if (snapshot.machineGroups != null) {
             snapshot.machineGroups.forEach(g -> {
                 if (g != null && g.groupId != null) {
@@ -79,13 +60,6 @@ public class ScheduleStore {
                     .map(AssignmentNormalization::normalize)
                     .forEach(store.assignments::add);
         }
-        if (snapshot.machineBlocks != null) {
-            store.machineBlocks.addAll(snapshot.machineBlocks);
-        }
-        if (snapshot.lastClosedShiftEndByGroup != null) {
-            store.lastClosedShiftEndByGroup.putAll(snapshot.lastClosedShiftEndByGroup);
-        }
-        store.overlapBatchesEnabled = resolveOverlapBatches(snapshot);
         if (snapshot.partDefinitions != null) {
             snapshot.partDefinitions.forEach((id, def) -> {
                 if (def != null && def.tasks != null) {
@@ -102,8 +76,6 @@ public class ScheduleStore {
     public ScheduleSnapshot toSnapshot() {
         ScheduleSnapshot snapshot = new ScheduleSnapshot();
         snapshot.factoryStartedAt = factoryStartedAt;
-        snapshot.simulationClock.enabled = simulationClockEnabled;
-        snapshot.simulationClock.currentTime = simulationCurrentTime;
         snapshot.machines = machines.stream().map(MachineSnapshot::from).toList();
         snapshot.machineGroups =
                 machineGroups.values().stream().map(MachineGroupSnapshot::from).toList();
@@ -116,39 +88,7 @@ public class ScheduleStore {
         });
         snapshot.orders = List.copyOf(orders);
         snapshot.assignments = List.copyOf(assignments);
-        snapshot.machineBlocks = List.copyOf(machineBlocks);
-        snapshot.lastClosedShiftEndByGroup = new LinkedHashMap<>(lastClosedShiftEndByGroup);
-        snapshot.scheduling.overlapBatches = overlapBatchesEnabled;
         return snapshot;
-    }
-
-    private static boolean resolveOverlapBatches(ScheduleSnapshot snapshot) {
-        String property = System.getProperty("scheduler.overlapBatches");
-        if (property != null) {
-            return Boolean.parseBoolean(property);
-        }
-        if (snapshot.scheduling != null) {
-            return snapshot.scheduling.overlapBatches;
-        }
-        return false;
-    }
-
-    public Instant lastClosedShiftEnd(String groupId) {
-        return lastClosedShiftEndByGroup.get(groupId);
-    }
-
-    public Map<String, Instant> lastClosedShiftEndByGroup() {
-        return Map.copyOf(lastClosedShiftEndByGroup);
-    }
-
-    public void setLastClosedShiftEnd(String groupId, Instant shiftEnd) {
-        if (groupId == null || groupId.isBlank()) {
-            throw new IllegalArgumentException("groupId required");
-        }
-        if (shiftEnd == null) {
-            throw new IllegalArgumentException("shiftEnd required");
-        }
-        lastClosedShiftEndByGroup.put(groupId, shiftEnd);
     }
 
     public static Map<String, MachineGroup> defaultMachineGroups() {
@@ -158,34 +98,23 @@ public class ScheduleStore {
                 new MachineGroup(
                         "cnc",
                         "ЧПУ (фрезерный и токарный)",
-                        weekdayShift(DayOfWeek.MONDAY, DayOfWeek.FRIDAY, LocalTime.of(8, 0), LocalTime.of(20, 0)),
+                        List.of(),
                         MachineGroupDefaults.setupDuration("cnc")));
         groups.put(
                 "heavy",
                 new MachineGroup(
                         "heavy",
                         "Тяжёлое оборудование (расточка, шлифование)",
-                        weekdayShift(DayOfWeek.MONDAY, DayOfWeek.FRIDAY, LocalTime.of(7, 0), LocalTime.of(19, 0)),
+                        List.of(),
                         MachineGroupDefaults.setupDuration("heavy")));
         groups.put(
                 "finish",
                 new MachineGroup(
                         "finish",
                         "Сварка и сборка",
-                        weekdayShift(DayOfWeek.MONDAY, DayOfWeek.FRIDAY, LocalTime.of(8, 0), LocalTime.of(17, 0)),
+                        List.of(),
                         MachineGroupDefaults.setupDuration("finish")));
         return groups;
-    }
-
-    private static List<WorkWindow> weekdayShift(
-            DayOfWeek from, DayOfWeek to, LocalTime start, LocalTime end) {
-        List<WorkWindow> windows = new ArrayList<>();
-        for (DayOfWeek day : DayOfWeek.values()) {
-            if (day.compareTo(from) >= 0 && day.compareTo(to) <= 0) {
-                windows.add(new WorkWindow(day, start, end));
-            }
-        }
-        return List.copyOf(windows);
     }
 
     private static String defaultGroupForMachine(String machineId) {
@@ -253,36 +182,8 @@ public class ScheduleStore {
         return Optional.ofNullable(machineGroups.get(machine.groupId()));
     }
 
-    public void setMachineGroup(MachineGroup group) {
-        machineGroups.put(group.groupId(), group);
-    }
-
     public Instant factoryStartedAt() {
         return factoryStartedAt;
-    }
-
-    public boolean simulationClockEnabled() {
-        return simulationClockEnabled;
-    }
-
-    public void setSimulationClockEnabled(boolean simulationClockEnabled) {
-        this.simulationClockEnabled = simulationClockEnabled;
-    }
-
-    public Instant simulationCurrentTime() {
-        return simulationCurrentTime;
-    }
-
-    public void setSimulationCurrentTime(Instant simulationCurrentTime) {
-        this.simulationCurrentTime = simulationCurrentTime;
-    }
-
-    public boolean overlapBatchesEnabled() {
-        return overlapBatchesEnabled;
-    }
-
-    public void setOverlapBatchesEnabled(boolean overlapBatchesEnabled) {
-        this.overlapBatchesEnabled = overlapBatchesEnabled;
     }
 
     public List<Order> orders() {
@@ -294,8 +195,48 @@ public class ScheduleStore {
     }
 
     public List<Machine> machines() {
-        return machines;
+        return List.copyOf(machines);
     }
+
+    public void updateMachineAvailability(String machineId, Instant availableAt) {
+        machines.stream()
+                .filter(m -> m.machineId().equals(machineId))
+                .findFirst()
+                .ifPresent(m -> {
+                    if (availableAt.isAfter(m.availableAt())) {
+                        m.setAvailableAt(availableAt);
+                    }
+                });
+    }
+
+    public void addMachine(Machine machine) {
+        machines.add(machine);
+    }
+
+    public SchedulingSnapshot captureSchedulingState() {
+        Map<String, Instant> machineAvailableAt = new LinkedHashMap<>();
+        for (Machine m : machines) {
+            machineAvailableAt.put(m.machineId(), m.availableAt());
+        }
+        return new SchedulingSnapshot(List.copyOf(orders), List.copyOf(assignments), machineAvailableAt);
+    }
+
+    public void rollbackTo(SchedulingSnapshot snapshot) {
+        orders.clear();
+        orders.addAll(snapshot.orders());
+        assignments.clear();
+        assignments.addAll(snapshot.assignments());
+        for (Machine m : machines) {
+            Instant at = snapshot.machineAvailableAt().get(m.machineId());
+            if (at != null) {
+                m.setAvailableAt(at);
+            }
+        }
+        sortOrders();
+    }
+
+    public record SchedulingSnapshot(
+            List<Order> orders, List<Assignment> assignments, Map<String, Instant> machineAvailableAt) {}
 
     public void addOrder(Order order) {
         orders.add(order);
@@ -304,80 +245,6 @@ public class ScheduleStore {
 
     public void addAssignment(Assignment assignment) {
         assignments.add(assignment);
-    }
-
-    public void replaceAssignment(Assignment assignment) {
-        for (int i = 0; i < assignments.size(); i++) {
-            if (assignments.get(i).assignmentId().equals(assignment.assignmentId())) {
-                assignments.set(i, assignment);
-                return;
-            }
-        }
-        assignments.add(assignment);
-    }
-
-    public List<MachineBlock> machineBlocks() {
-        return List.copyOf(machineBlocks);
-    }
-
-    public void addMachineBlock(MachineBlock block) {
-        machineBlocks.add(block);
-    }
-
-    public void clearMachineBlocks() {
-        machineBlocks.clear();
-    }
-
-    public Optional<Assignment> findPlannedWorkAssignment(
-            String orderId, String partId, int unitIndex, String taskId) {
-        return AssignmentFilters.work(assignments).stream()
-                .filter(a -> a.orderId().equals(orderId)
-                        && a.partId().equals(partId)
-                        && a.unitIndex() == unitIndex
-                        && a.taskId().equals(taskId)
-                        && a.isPlanned())
-                .findFirst();
-    }
-
-    public Optional<Assignment> findPlannedSetupForUnit(
-            String orderId, String partId, int unitIndex, String machineId) {
-        return assignments.stream()
-                .filter(a -> SetupIntervals.isSetup(a.taskId()))
-                .filter(a -> a.orderId().equals(orderId)
-                        && a.partId().equals(partId)
-                        && a.unitIndex() == unitIndex
-                        && a.machineId().equals(machineId)
-                        && a.isPlanned())
-                .findFirst();
-    }
-
-    public int cancelPlannedForOrder(String orderId) {
-        int count = 0;
-        for (int i = 0; i < assignments.size(); i++) {
-            Assignment a = assignments.get(i);
-            if (!a.orderId().equals(orderId) || !a.isPlanned()) {
-                continue;
-            }
-            assignments.set(i, cancel(a));
-            count++;
-        }
-        return count;
-    }
-
-    private static Assignment cancel(Assignment a) {
-        return new Assignment(
-                a.assignmentId(),
-                a.orderId(),
-                a.partId(),
-                a.unitIndex(),
-                a.taskId(),
-                a.sequence(),
-                a.machineId(),
-                a.plannedStart(),
-                a.plannedEnd(),
-                AssignmentStatus.CANCELLED,
-                a.actualStart(),
-                a.actualEnd());
     }
 
     public Optional<Order> findOrder(String orderId) {
@@ -419,16 +286,9 @@ public class ScheduleStore {
         orders.sort(OrderPriorities.QUEUE_ORDER);
     }
 
-    /** Деталь заказа из справочника (копия цепочки задач). */
     public Part createPart(String partId, int quantity) {
         PartDefinition def = definition(partId);
         return new Part(partId, quantity, def.tasks());
-    }
-
-    public Map<String, Integer> partPriorities() {
-        Map<String, Integer> map = new LinkedHashMap<>();
-        partDefinitions.forEach((id, def) -> map.put(id, def.priority()));
-        return Map.copyOf(map);
     }
 
     public Map<String, PartDefinition> partDefinitions() {

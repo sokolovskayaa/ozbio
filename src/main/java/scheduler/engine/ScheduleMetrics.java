@@ -7,7 +7,6 @@ import java.util.List;
 import java.util.Optional;
 import scheduler.model.Assignment;
 import scheduler.model.AssignmentStatus;
-import scheduler.model.Capability;
 import scheduler.model.Order;
 import scheduler.model.Part;
 import scheduler.model.Task;
@@ -46,7 +45,6 @@ public final class ScheduleMetrics {
         return nextUnscheduledUnitIndex(orderId, part, assignments) >= part.quantity();
     }
 
-    /** Сколько штук имеют завершённую или запланированную рабочую операцию {@code taskId}. */
     public static int unitsScheduledForTask(
             String orderId, String partId, String taskId, List<Assignment> assignments) {
         return (int) AssignmentFilters.work(assignments).stream()
@@ -81,7 +79,6 @@ public final class ScheduleMetrics {
         return Duration.between(start, end);
     }
 
-    /** Индекс следующей штуки без полного плана по всем операциям (0..quantity-1). */
     public static int nextUnscheduledUnitIndex(String orderId, Part part, List<Assignment> assignments) {
         for (int unit = 0; unit < part.quantity(); unit++) {
             if (!isUnitFullyScheduled(orderId, part, unit, assignments)) {
@@ -91,7 +88,6 @@ public final class ScheduleMetrics {
         return part.quantity();
     }
 
-    /** Все операции штуки есть в плане (PLANNED или COMPLETED). */
     public static boolean isUnitFullyScheduled(
             String orderId, Part part, int unitIndex, List<Assignment> assignments) {
         for (Task task : part.tasks()) {
@@ -102,7 +98,6 @@ public final class ScheduleMetrics {
         return true;
     }
 
-    /** Все операции штуки выполнены по факту. */
     public static boolean isUnitComplete(
             String orderId, Part part, int unitIndex, List<Assignment> assignments) {
         for (Task task : part.tasks()) {
@@ -132,11 +127,6 @@ public final class ScheduleMetrics {
         return Optional.empty();
     }
 
-    public static Optional<Task> readyTask(
-            Order order, Part part, List<Assignment> assignments, Instant orderStart, ScheduleStore store) {
-        return readyWork(order, part, assignments, orderStart, store).map(ReadyWork::task);
-    }
-
     public static boolean isTaskReady(
             Order order,
             Part part,
@@ -149,29 +139,9 @@ public final class ScheduleMetrics {
             return false;
         }
         if (task.sequence() > 0) {
-            Task previousInRoute = part.tasks().stream()
-                    .filter(t -> t.sequence() == task.sequence() - 1)
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalStateException(
-                            "Missing route task sequence " + (task.sequence() - 1)));
-            if (!store.overlapBatchesEnabled()) {
-                if (unitIndex == 0
-                        && !isBatchSequenceComplete(order, part, task.sequence() - 1, assignments)) {
-                    return false;
-                }
-            } else {
-                if (!isWorkTaskScheduled(
-                        order.orderId(), part, unitIndex, previousInRoute.taskId(), assignments)) {
-                    return false;
-                }
-                BatchOverlap.OverlapMode mode = BatchOverlap.overlapMode(store, previousInRoute, task);
-                if (unitIndex == 0
-                        && mode == BatchOverlap.OverlapMode.PIPELINE
-                        && !isBatchSequenceComplete(order, part, task.sequence() - 1, assignments)
-                        && requiresFullPreviousBatchBeforePackageStart(
-                                store, previousInRoute, task)) {
-                    return false;
-                }
+            if (unitIndex == 0
+                    && !isBatchSequenceComplete(order, part, task.sequence() - 1, assignments)) {
+                return false;
             }
         }
         if (unitIndex == 0) {
@@ -190,9 +160,9 @@ public final class ScheduleMetrics {
             ScheduleStore store,
             String targetMachineId) {
         Instant routeConstraint = previousTaskEndFromRoute(
-                order, part, unitIndex, sequence, assignments, orderStart, store);
-        Instant sameMachineConstraint = latestEarlierSharedMachineBatchEnd(
-                order, part, sequence, assignments, store, targetMachineId);
+                order, part, unitIndex, sequence, assignments, orderStart);
+        Instant sameMachineConstraint = latestEarlierBatchEndOnMachine(
+                order, part, sequence, assignments, targetMachineId);
         if (sameMachineConstraint == null) {
             return routeConstraint;
         }
@@ -205,18 +175,13 @@ public final class ScheduleMetrics {
             int unitIndex,
             int sequence,
             List<Assignment> assignments,
-            Instant orderStart,
-            ScheduleStore store) {
+            Instant orderStart) {
         if (sequence > 0) {
             Task previousInRoute = part.tasks().stream()
                     .filter(t -> t.sequence() == sequence - 1)
                     .findFirst()
                     .orElseThrow(() -> new IllegalStateException(
                             "Missing route task sequence " + (sequence - 1)));
-            Task currentInRoute = part.tasks().stream()
-                    .filter(t -> t.sequence() == sequence)
-                    .findFirst()
-                    .orElseThrow(() -> new IllegalStateException("Missing route task sequence " + sequence));
             Instant prevUnitEnd = endOfUnitOperation(
                     order.orderId(), part.partId(), unitIndex, previousInRoute.sequence(), assignments);
             if (unitIndex > 0) {
@@ -224,15 +189,7 @@ public final class ScheduleMetrics {
                         order.orderId(), part.partId(), unitIndex - 1, sequence, assignments);
                 return prevUnitEnd.isAfter(sameOpPrev) ? prevUnitEnd : sameOpPrev;
             }
-            if (!store.overlapBatchesEnabled()) {
-                return batchMaxEffectiveEnd(order, part, previousInRoute, assignments);
-            }
-            return switch (BatchOverlap.overlapMode(store, previousInRoute, currentInRoute)) {
-                case NONE -> batchMaxEffectiveEnd(order, part, previousInRoute, assignments);
-                case PER_UNIT -> prevUnitEnd;
-                case PIPELINE -> BatchOverlap.earliestPackageStartForContinuousFeed(
-                        order, part, sequence, assignments, orderStart);
-            };
+            return batchMaxEffectiveEnd(order, part, previousInRoute, assignments);
         }
         if (unitIndex == 0) {
             return orderStart;
@@ -240,22 +197,19 @@ public final class ScheduleMetrics {
         return endOfUnitOperation(order.orderId(), part.partId(), unitIndex - 1, 0, assignments);
     }
 
-    /**
-     * На одном физическом станке нельзя начинать op.N+1, пока на <strong>этом же</strong> станке
-     * не завершён пакет op.N. При overlap между op на разных станках (≥2 общих станка) полный
-     * пакет op.N по всему цеху не требуется.
-     */
+    /** На том же станке — сначала весь пакет более ранней операции, если она там уже планировалась. */
     private static boolean isEarlierSameMachineBatchComplete(
             Order order, Part part, Task task, List<Assignment> assignments, ScheduleStore store) {
         for (Task earlier : part.tasks()) {
             if (earlier.sequence() >= task.sequence()) {
                 continue;
             }
-            if (!BatchOverlap.sharesOperationalMachine(
-                    store, earlier.requiredCapability(), task.requiredCapability())) {
-                continue;
-            }
-            if (BatchOverlap.overlapMode(store, earlier, task) != BatchOverlap.OverlapMode.NONE) {
+            boolean usedOnAnyMachine = AssignmentFilters.work(assignments).stream()
+                    .anyMatch(a -> a.orderId().equals(order.orderId())
+                            && a.partId().equals(part.partId())
+                            && a.taskId().equals(earlier.taskId())
+                            && (a.isCompleted() || a.isPlanned()));
+            if (!usedOnAnyMachine) {
                 continue;
             }
             if (!isBatchSequenceComplete(order, part, earlier.sequence(), assignments)) {
@@ -265,35 +219,21 @@ public final class ScheduleMetrics {
         return true;
     }
 
-    private static Instant latestEarlierSharedMachineBatchEnd(
+    private static Instant latestEarlierBatchEndOnMachine(
             Order order,
             Part part,
             int currentSequence,
             List<Assignment> assignments,
-            ScheduleStore store,
             String targetMachineId) {
-        Task current = taskAtSequence(part, currentSequence);
         Instant latest = null;
         for (Task earlier : part.tasks()) {
             if (earlier.sequence() >= currentSequence) {
                 continue;
             }
-            if (!BatchOverlap.sharesOperationalMachine(
-                    store, earlier.requiredCapability(), current.requiredCapability())) {
-                continue;
-            }
-            if (BatchOverlap.overlapMode(store, earlier, current) != BatchOverlap.OverlapMode.NONE) {
-                Optional<Instant> onTarget = batchMaxEffectiveEndOnMachine(
-                        order, part, earlier, assignments, targetMachineId);
-                if (onTarget.isPresent()
-                        && (latest == null || onTarget.get().isAfter(latest))) {
-                    latest = onTarget.get();
-                }
-                continue;
-            }
-            Instant batchEnd = batchMaxEffectiveEnd(order, part, earlier, assignments);
-            if (latest == null || batchEnd.isAfter(latest)) {
-                latest = batchEnd;
+            Optional<Instant> onTarget = batchMaxEffectiveEndOnMachine(
+                    order, part, earlier, assignments, targetMachineId);
+            if (onTarget.isPresent() && (latest == null || onTarget.get().isAfter(latest))) {
+                latest = onTarget.get();
             }
         }
         return latest;
@@ -325,13 +265,6 @@ public final class ScheduleMetrics {
                 .map(a -> a.isCompleted() ? a.effectiveEnd() : a.plannedEnd())
                 .max(Comparator.naturalOrder())
                 .orElseThrow(() -> new IllegalStateException("Batch operation " + task.taskId() + " not complete"));
-    }
-
-    private static Task taskAtSequence(Part part, int sequence) {
-        return part.tasks().stream()
-                .filter(t -> t.sequence() == sequence)
-                .findFirst()
-                .orElseThrow(() -> new IllegalStateException("Missing task sequence " + sequence));
     }
 
     private static Instant endOfUnitOperation(
@@ -397,22 +330,5 @@ public final class ScheduleMetrics {
 
     private static List<Assignment> activeAssignments(List<Assignment> assignments) {
         return AssignmentFilters.active(assignments);
-    }
-
-    /** Весь пакет op.N в плане перед штукой 0 op.N+1 (две токарки; фреза→токарка). Только при overlap. */
-    private static boolean requiresFullPreviousBatchBeforePackageStart(
-            ScheduleStore store, Task previous, Task current) {
-        if (!store.overlapBatchesEnabled()) {
-            return false;
-        }
-        int shared = BatchOverlap.sharedOperationalMachines(
-                        store, previous.requiredCapability(), current.requiredCapability())
-                .size();
-        if (shared >= 2) {
-            return true;
-        }
-        return shared == 0
-                && previous.requiredCapability() == Capability.MILLING
-                && current.requiredCapability() == Capability.TURNING;
     }
 }

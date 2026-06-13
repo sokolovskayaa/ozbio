@@ -22,7 +22,7 @@ import scheduler.service.AddOrderResult;
 import scheduler.service.SchedulerService;
 import scheduler.store.JsonScheduleRepository;
 import scheduler.store.ScheduleStore;
-import scheduler.time.StoreCurrentTimeProvider;
+import scheduler.time.FixedTimeProvider;
 
 /**
  * Сценарий {@code ./scripts/demo.sh}: заказ З-2026-0142, по {@value #DEMO_QUANTITY} шт. вал + корпус.
@@ -34,8 +34,8 @@ class DemoScheduleTest {
     /** Как {@code DEMO_PART_QTY} в {@code scripts/demo.sh}. */
     private static final int DEMO_QUANTITY = 8;
 
-    /** Минимум календарного интервала черновой токарки (несколько штук подряд в сменах). */
-    private static final Duration MIN_ROUGH_TURNING_SPAN = Duration.ofHours(5);
+    /** Минимум календарного интервала черновой токарки (8×70 мин). */
+    private static final Duration MIN_ROUGH_TURNING_SPAN = Duration.ofHours(9);
 
     @TempDir
     Path tempDir;
@@ -51,7 +51,7 @@ class DemoScheduleTest {
         Files.copy(example, scheduleFile);
         store = new JsonScheduleRepository(scheduleFile).loadOrCreate();
         factoryStart = store.factoryStartedAt();
-        service = new SchedulerService(store, new JsonScheduleRepository(scheduleFile), new StoreCurrentTimeProvider(store));
+        service = new SchedulerService(store, new JsonScheduleRepository(scheduleFile), new FixedTimeProvider(factoryStart));
     }
 
     @Test
@@ -167,27 +167,6 @@ class DemoScheduleTest {
                                 + rough.unitIndex());
             }
         }
-    }
-
-    @Test
-    void demoOrder0142_overlap_boringStartsBeforeRoughMillingBatchEnds() throws IOException {
-        store.setOverlapBatchesEnabled(true);
-        AddOrderResult result = service.addOrder(demoOrderRequest());
-
-        Instant lastRoughMillEnd = result.assignmentsForOrder().stream()
-                .filter(a -> a.partId().equals("корпус-бура") && a.taskId().equals("черновая-фрезеровка"))
-                .map(Assignment::plannedEnd)
-                .max(Instant::compareTo)
-                .orElseThrow();
-        Instant firstBoringStart = result.assignmentsForOrder().stream()
-                .filter(a -> a.partId().equals("корпус-бура") && a.taskId().equals("расточивание-отверстий"))
-                .map(Assignment::plannedStart)
-                .min(Instant::compareTo)
-                .orElseThrow();
-
-        assertTrue(
-                firstBoringStart.isBefore(lastRoughMillEnd),
-                "overlap: расточка на РАСТОЧ-03 стартует до окончания всего пакета черновой фрезеровки на ФРЕЗ-ЧПУ-01");
     }
 
     private static OrderRequest demoOrderRequest() {

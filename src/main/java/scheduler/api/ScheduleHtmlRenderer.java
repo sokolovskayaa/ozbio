@@ -4,16 +4,11 @@ import com.google.gson.Gson;
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import scheduler.engine.FactoryZone;
-import scheduler.engine.ShiftCalendar;
-import scheduler.engine.ShiftCalendar.TimeSegment;
-import scheduler.model.MachineGroup;
-import scheduler.model.WorkWindow;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -28,7 +23,7 @@ import scheduler.model.SetupIntervals;
 
 public final class ScheduleHtmlRenderer {
     private static final DateTimeFormatter FMT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(FactoryZone.ZONE);
     private static final Gson GSON = new Gson();
 
     private ScheduleHtmlRenderer() {}
@@ -49,13 +44,16 @@ public final class ScheduleHtmlRenderer {
                 .append(esc(FMT.format(view.generatedAt())))
                 .append("</p>");
         html.append("<div class=\"cards\">");
-        html.append(card("Старт смены", FMT.format(view.factoryStartedAt())));
+        html.append(card("Запуск завода", FMT.format(view.factoryStartedAt())));
         html.append(card(
                 "Сейчас",
                 FMT.format(view.clock().currentTime())
                         + (view.clock().simulationEnabled() ? " <span class=\"tag\">симуляция</span>" : "")));
         html.append(card("Заказов в очереди", String.valueOf(view.orders().size())));
         html.append(card("Станков", String.valueOf(view.machines().size())));
+        html.append("</div>");
+        html.append("<div class=\"header-actions\">");
+        html.append("<a href=\"#controls\" class=\"btn-primary btn-add-order-jump\">+ Добавить заказ</a>");
         html.append("</div>");
         appendPageNav(html);
         appendFactoryOverviewStrip(html, view, view.clock().currentTime());
@@ -64,7 +62,6 @@ public final class ScheduleHtmlRenderer {
         Instant now = view.clock().currentTime();
         appendControlsPanel(html, view, now);
         appendOrdersSection(html, view, now);
-        appendShiftCloseSection(html, view, now);
         appendMachinesParkSection(html, view);
         appendMachineGroupsSection(html, view);
         appendMachineScheduleSection(html, view, bounds, now);
@@ -105,13 +102,10 @@ public final class ScheduleHtmlRenderer {
 
     private static void appendControlsPanel(StringBuilder html, ScheduleView view, Instant now) {
         html.append("<section id=\"controls\" class=\"controls-panel\"><h2>Управление планом</h2>");
-        if (!view.clock().simulationEnabled()) {
-            html.append("<p class=\"hint\">Симуляция времени отключена — добавление заказов и сдвиг ")
-                    .append("времени доступны только через API.</p></section>");
-            return;
-        }
         html.append("<p class=\"hint\">Номер заказа присваивается автоматически (З-год-номер). ")
-                .append("Планирование от текущего времени симуляции; время — только вперёд.</p>");
+                .append("Планирование от текущего времени (")
+                .append(esc(FMT.format(now)))
+                .append(").</p>");
         html.append("<div id=\"controls-message\" class=\"controls-message hidden\" role=\"status\"></div>");
         html.append("<div class=\"controls-grid\">");
 
@@ -124,22 +118,6 @@ public final class ScheduleHtmlRenderer {
         html.append("</fieldset>");
         html.append("<button type=\"submit\" class=\"btn-primary\" id=\"order-submit\">")
                 .append("Добавить заказ</button>");
-        html.append("</form>");
-
-        html.append("<form id=\"advance-time-form\" class=\"control-card\">");
-        html.append("<h3>Время симуляции</h3>");
-        html.append("<p class=\"sim-now\">Сейчас: <strong id=\"sim-now-label\">")
-                .append(esc(FMT.format(now)))
-                .append("</strong></p>");
-        html.append("<div class=\"time-advance-btns\" role=\"group\" aria-label=\"Сдвиг вперёд\">");
-        html.append("<button type=\"button\" class=\"btn-secondary\" data-advance-hours=\"2\">+2 ч</button>");
-        html.append("<button type=\"button\" class=\"btn-secondary\" data-advance-hours=\"8\">+8 ч</button>");
-        html.append("<button type=\"button\" class=\"btn-secondary\" data-advance-hours=\"24\">+1 день</button>");
-        html.append("<button type=\"button\" class=\"btn-secondary\" data-advance-hours=\"168\">+1 неделя</button>");
-        html.append("</div>");
-        html.append("<label class=\"control-field\">Установить на ");
-        html.append("<input type=\"datetime-local\" id=\"sim-time-input\" required></label>");
-        html.append("<button type=\"submit\" class=\"btn-primary\" id=\"time-submit\">Вперёд</button>");
         html.append("</form>");
 
         html.append("</div></section>");
@@ -157,49 +135,11 @@ public final class ScheduleHtmlRenderer {
         return GSON.toJson(rows);
     }
 
-    private static void appendShiftCloseSection(StringBuilder html, ScheduleView view, Instant now) {
-        html.append("<section id=\"shift-close\"><h2>Закрытие смены</h2>");
-        html.append("<div id=\"shift-stale-banner\" class=\"shift-stale-banner hidden\" role=\"alert\"></div>");
-        html.append("<p id=\"shift-close-hint\" class=\"hint\">Заполните факты по ")
-                .append("<strong>всем станкам</strong> всех незакрытых смен (все группы). ")
-                .append("Перепланирование выполняется <strong>один раз</strong> только после нажатия кнопки.</p>");
-        html.append("<h3 id=\"shift-close-title\" class=\"shift-close-title\">Загрузка…</h3>");
-        html.append("<form id=\"shift-close-form\" class=\"hidden\">");
-        html.append("<table class=\"shift-facts\"><thead><tr>");
-        html.append("<th>Группа</th><th>Станок</th><th>Операция</th><th>В плане</th><th>Сделано</th>");
-        html.append("</tr></thead><tbody id=\"shift-count-rows\"></tbody></table>");
-        html.append("<details class=\"shift-idle-details\"><summary>Дополнительно: простои станков</summary>");
-        html.append("<div id=\"idle-blocks\">");
-        html.append("<div class=\"idle-row\">");
-        html.append("<label>Станок <select class=\"idle-machine\">");
-        for (MachineView m : view.machines()) {
-            html.append("<option value=\"")
-                    .append(esc(m.machineId()))
-                    .append("\">")
-                    .append(esc(DomainLabels.machineTitle(m.machineId())))
-                    .append("</option>");
-        }
-        html.append("</select></label>");
-        html.append("<label>с <input type=\"datetime-local\" class=\"idle-from\" value=\"")
-                .append(esc(toDatetimeLocalValue(now)))
-                .append("\"></label>");
-        html.append("<label>по <input type=\"datetime-local\" class=\"idle-to\" value=\"")
-                .append(esc(toDatetimeLocalValue(now.plusSeconds(3600))))
-                .append("\"></label>");
-        html.append("</div></div>");
-        html.append("<button type=\"button\" class=\"btn-secondary\" id=\"add-idle-row\">+ Простой</button>");
-        html.append("</details>");
-        html.append("<p class=\"shift-actions\">");
-        html.append("<button type=\"submit\" class=\"btn-primary\">Закрыть все смены и перепланировать</button>");
-        html.append("</p></form></section>");
-    }
-
-    private static String toDatetimeLocalValue(Instant instant) {
-        return instant.atZone(FactoryZone.ZONE).toLocalDateTime().toString().substring(0, 16);
-    }
-
     private static void appendOrdersSection(StringBuilder html, ScheduleView view, Instant now) {
-        html.append("<section id=\"orders\"><h2>Заказы</h2>");
+        html.append("<section id=\"orders\"><div class=\"section-head\">");
+        html.append("<h2>Заказы</h2>");
+        html.append("<a href=\"#controls\" class=\"btn-primary btn-add-order-jump\">+ Добавить заказ</a>");
+        html.append("</div>");
         html.append("<p class=\"hint\">Одинаковые операции объединены в таблице. Диаграмма по станкам — ")
                 .append("в разделе «Расписание по станкам». Сейчас (")
                 .append(esc(FMT.format(now)))
@@ -288,7 +228,8 @@ public final class ScheduleHtmlRenderer {
         }
 
         if (view.orders().isEmpty()) {
-            html.append("<p class=\"empty\">Заказов пока нет.</p>");
+            html.append("<p class=\"empty\">Заказов пока нет. ")
+                    .append("<a href=\"#controls\" class=\"btn-add-order-jump\">Добавить заказ</a></p>");
         }
         html.append("</section>");
     }
@@ -296,10 +237,9 @@ public final class ScheduleHtmlRenderer {
     private static void appendPageNav(StringBuilder html) {
         html.append("<nav class=\"page-nav\" aria-label=\"Разделы плана\">");
         html.append("<a href=\"#machines\">Парк станков</a>");
-        html.append("<a href=\"#machine-groups\">Группы и смены</a>");
+        html.append("<a href=\"#machine-groups\">Группы станков</a>");
         html.append("<a href=\"#machine-schedule\">Расписание по станкам</a>");
         html.append("<a href=\"#orders\">Заказы</a>");
-        html.append("<a href=\"#shift-close\">Закрытие смены</a>");
         html.append("</nav>");
     }
 
@@ -353,34 +293,6 @@ public final class ScheduleHtmlRenderer {
         return String.join(", ", windows);
     }
 
-    private static void appendCurrentShiftsSummary(StringBuilder html, ScheduleView view, Instant now) {
-        html.append("<div class=\"shift-summary\" role=\"status\">");
-        html.append("<span class=\"shift-summary-label\">Текущие смены (МСК, от ")
-                .append(esc(FMT.format(now)))
-                .append("):</span> ");
-        boolean any = false;
-        for (MachineGroupView groupView : view.machineGroups()) {
-            MachineGroup group = toMachineGroup(groupView);
-            var window = ShiftCalendar.shiftWindowContaining(now, group, FactoryZone.ZONE);
-            html.append("<span class=\"shift-summary-item\">");
-            html.append("<strong>").append(esc(groupView.name())).append("</strong> ");
-            if (window.isPresent()) {
-                any = true;
-                html.append(esc(FMT.format(window.get().start())))
-                        .append(" — ")
-                        .append(esc(FMT.format(window.get().end())));
-            } else {
-                String today = formatTodayShiftWindow(groupView, now);
-                html.append(today != null ? esc(today) : "—");
-            }
-            html.append("</span> ");
-        }
-        if (!any) {
-            html.append("<span class=\"muted\">вне рабочего окна</span>");
-        }
-        html.append("</div>");
-    }
-
     private static void appendMachinesParkSection(StringBuilder html, ScheduleView view) {
         html.append("<section id=\"machines\"><h2>Парк станков</h2><table><thead><tr>");
         html.append("<th>Станок</th><th>Статус</th><th>Свободен с</th><th>Возможности</th></tr></thead><tbody>");
@@ -402,9 +314,8 @@ public final class ScheduleHtmlRenderer {
     }
 
     private static void appendMachineGroupsSection(StringBuilder html, ScheduleView view) {
-        html.append("<section id=\"machine-groups\"><h2>Группы станков и смены</h2>");
-        html.append("<p class=\"hint\">Работы планируются только в указанные окна (часовой пояс завода: Москва). ");
-        html.append("Переналадка добавляется автоматически при смене типа операции (taskId) на станке.</p>");
+        html.append("<section id=\"machine-groups\"><h2>Группы станков</h2>");
+        html.append("<p class=\"hint\">Переналадка добавляется автоматически при смене типа операции на станке.</p>");
         for (MachineGroupView group : view.machineGroups()) {
             html.append("<h3>")
                     .append(esc(group.name()))
@@ -547,10 +458,8 @@ public final class ScheduleHtmlRenderer {
     private static void appendMachineScheduleSection(
             StringBuilder html, ScheduleView view, TimelineBounds fullBounds, Instant now) {
         html.append("<section id=\"machine-schedule\"><h2>Расписание по станкам</h2>");
-        appendCurrentShiftsSummary(html, view, now);
-        html.append("<p class=\"hint\">Каждая строка — станок; серый фон — вне смены; ")
-                .append("<span class=\"legend-setup\">оранжевый</span> — переналадка (смена типа операции на станке). ")
-                .append("По умолчанию — <strong>текущая смена</strong> (08:00–20:00 и др. по группе). ")
+        html.append("<p class=\"hint\">Каждая строка — станок; ")
+                .append("<span class=\"legend-setup\">оранжевый</span> — переналадка. ")
                 .append("Масштаб: пресеты, ◀ ▶, свой диапазон. ")
                 .append("«По станку» — свой интервал каждой строки. ")
                 .append("Наведите на отрезок для деталей.</p>");
@@ -696,7 +605,7 @@ public final class ScheduleHtmlRenderer {
 
     private static Map<String, long[]> zoomPresetsMap(ScheduleView view, Instant now) {
         Map<String, long[]> presets = new LinkedHashMap<>();
-        presets.put("shift", boundsToMs(presetShift(now, view)));
+        presets.put("shift", boundsToMs(presetDay(now)));
         presets.put("day", boundsToMs(presetDay(now)));
         presets.put("3d", boundsToMs(presetDays(now, 1, 2)));
         presets.put("week", boundsToMs(presetWeek(now)));
@@ -753,7 +662,6 @@ public final class ScheduleHtmlRenderer {
     private static void appendZoomControls(StringBuilder html) {
         html.append("<div class=\"zoom-bar\" role=\"toolbar\" aria-label=\"Масштаб времени\">");
         html.append("<span class=\"zoom-label\">Масштаб:</span>");
-        html.append("<button type=\"button\" class=\"btn-zoom\" data-zoom=\"shift\">Смена</button>");
         html.append("<button type=\"button\" class=\"btn-zoom\" data-zoom=\"day\">День</button>");
         html.append("<button type=\"button\" class=\"btn-zoom\" data-zoom=\"3d\">3 дня</button>");
         html.append("<button type=\"button\" class=\"btn-zoom\" data-zoom=\"week\">Неделя</button>");
@@ -813,7 +721,6 @@ public final class ScheduleHtmlRenderer {
             Map<String, Integer> partPriority,
             boolean machineRow,
             TimelineBounds rowViewport) {
-        Map<String, MachineGroup> groupsById = machineGroupsById(view);
         Map<String, String> machineGroupId = machineToGroupId(view);
 
         html.append("<div class=\"timeline-block\">");
@@ -847,12 +754,11 @@ public final class ScheduleHtmlRenderer {
 
         Map<String, PartCalendarSpan> partSpansOnMachine = partCalendarSpansOnMachine(assignments);
         for (AssignmentView a : assignments) {
-            MachineGroup group = groupsById.get(machineGroupId.get(a.machineId()));
             int qty = quantityByOrderPart.getOrDefault(orderPartKey(a.orderId(), a.partId()), 1);
             PartCalendarSpan partSpan = partSpansOnMachine.get(orderPartKey(a.orderId(), a.partId()));
             String tooltip = assignmentTooltip(a, qty, partSpan);
             boolean setup = SetupIntervals.isSetup(a.taskId());
-            for (TimeSegment segment : segmentsForAssignment(a, group, view)) {
+            for (CalendarSegment segment : segmentsForAssignment(a)) {
                 double left = percentExact(viewport.start(), viewport.spanSeconds(), segment.start());
                 double width = Math.max(
                         0.2,
@@ -907,14 +813,6 @@ public final class ScheduleHtmlRenderer {
         html.append("</div>");
     }
 
-    private static Map<String, MachineGroup> machineGroupsById(ScheduleView view) {
-        Map<String, MachineGroup> map = new LinkedHashMap<>();
-        for (MachineGroupView gv : view.machineGroups()) {
-            map.put(gv.groupId(), toMachineGroup(gv));
-        }
-        return map;
-    }
-
     private static Map<String, String> machineToGroupId(ScheduleView view) {
         Map<String, String> map = new LinkedHashMap<>();
         for (MachineView m : view.machines()) {
@@ -923,49 +821,16 @@ public final class ScheduleHtmlRenderer {
         return map;
     }
 
-    private static MachineGroup toMachineGroup(MachineGroupView view) {
-        List<WorkWindow> windows = view.workWindows().stream()
-                .map(w -> new WorkWindow(
-                        DayOfWeek.valueOf(w.dayCode()), LocalTime.parse(w.start()), LocalTime.parse(w.end())))
-                .toList();
-        Duration setup = Duration.ZERO;
-        try {
-            setup = Duration.parse(view.setupDuration());
-        } catch (Exception ignored) {
-            // keep zero
-        }
-        return new MachineGroup(view.groupId(), view.name(), windows, setup);
-    }
-
-    private static List<TimeSegment> segmentsForAssignment(
-            AssignmentView a, MachineGroup group, ScheduleView view) {
+    private static List<CalendarSegment> segmentsForAssignment(AssignmentView a) {
         Instant start = a.actualStart() != null ? a.actualStart() : a.plannedStart();
         Instant end = a.actualEnd() != null ? a.actualEnd() : a.plannedEnd();
-        if (a.actualEnd() != null && !end.isBefore(start)) {
-            return List.of(new TimeSegment(start, end));
+        if (!end.isBefore(start)) {
+            return List.of(new CalendarSegment(start, end));
         }
-        Duration workDuration;
-        if (SetupIntervals.isSetup(a.taskId())) {
-            workDuration = group != null ? group.setupDuration() : Duration.between(a.plannedStart(), a.plannedEnd());
-        } else {
-            workDuration = taskDuration(view, a.taskId());
-            if (workDuration.isZero()) {
-                return List.of(new TimeSegment(start, end));
-            }
-        }
-        return ShiftCalendar.workSegments(start, workDuration, group, FactoryZone.ZONE);
+        return List.of(new CalendarSegment(start, start));
     }
 
-    private static Duration taskDuration(ScheduleView view, String taskId) {
-        for (PartCatalogView part : view.partCatalog()) {
-            for (TaskTemplateView task : part.tasks()) {
-                if (task.taskId().equals(taskId)) {
-                    return Duration.parse(task.duration());
-                }
-            }
-        }
-        return Duration.ZERO;
-    }
+    private record CalendarSegment(Instant start, Instant end) {}
 
     private record PartCalendarSpan(String orderId, String partId, Instant start, Instant end) {}
 
@@ -999,10 +864,6 @@ public final class ScheduleHtmlRenderer {
                 .append("</span><br><span class=\"group-tag\">")
                 .append(esc(machine.groupName()))
                 .append("</span>");
-        String shiftToday = shiftWindowLabelForMachine(machine, view, now);
-        if (!shiftToday.isEmpty()) {
-            html.append(" <span class=\"shift-tag\">").append(esc(shiftToday)).append("</span>");
-        }
         if (!assignments.isEmpty() && rowViewport != null) {
             html.append("<div class=\"machine-calendar-spans\">");
             html.append("<div class=\"machine-span-all\">Все детали (календарь): ")
@@ -1040,17 +901,6 @@ public final class ScheduleHtmlRenderer {
         return FMT.format(start) + " — " + FMT.format(end);
     }
 
-    private static String shiftWindowLabelForMachine(MachineView machine, ScheduleView view, Instant now) {
-        for (MachineGroupView groupView : view.machineGroups()) {
-            if (!groupView.groupId().equals(machine.groupId())) {
-                continue;
-            }
-            String today = formatTodayShiftWindow(groupView, now);
-            return today != null ? "смена " + today : "";
-        }
-        return "";
-    }
-
     private static String assignmentTooltip(AssignmentView a, int partQuantity, PartCalendarSpan partOnMachine) {
         StringBuilder sb = new StringBuilder();
         sb.append("Заказ: ").append(a.orderId()).append('\n');
@@ -1083,20 +933,14 @@ public final class ScheduleHtmlRenderer {
             Instant end = now.plus(Duration.ofHours(2));
             return withPadding(new TimelineBounds(now, end, Duration.between(now, end).getSeconds()));
         }
-        Map<String, MachineGroup> groupsById = machineGroupsById(view);
-        Map<String, String> machineGroupId = machineToGroupId(view);
         Instant start = assignments.stream()
-                .flatMap(a -> segmentsForAssignment(
-                                a, groupsById.get(machineGroupId.get(a.machineId())), view)
-                        .stream())
-                .map(TimeSegment::start)
+                .flatMap(a -> segmentsForAssignment(a).stream())
+                .map(CalendarSegment::start)
                 .min(Comparator.naturalOrder())
                 .orElse(now);
         Instant end = assignments.stream()
-                .flatMap(a -> segmentsForAssignment(
-                                a, groupsById.get(machineGroupId.get(a.machineId())), view)
-                        .stream())
-                .map(TimeSegment::end)
+                .flatMap(a -> segmentsForAssignment(a).stream())
+                .map(CalendarSegment::end)
                 .max(Comparator.naturalOrder())
                 .orElse(now.plus(Duration.ofHours(1)));
         if (!now.isBefore(start)) {
@@ -1256,53 +1100,14 @@ public final class ScheduleHtmlRenderer {
         if (span <= 86400) {
             return full;
         }
-        return presetShift(now, view);
+        return presetDay(now);
     }
 
     private static String defaultZoomPresetId(TimelineBounds full) {
         if (full.spanSeconds() <= 86400) {
             return "all";
         }
-        return "shift";
-    }
-
-    /**
-     * Окно текущей смены по группам станков (объединение окон, в которые попадает {@code now}).
-     * Иначе при «конце смены» пресет «−2 ч … +10 ч» скрывает операции с утра.
-     */
-    private static TimelineBounds presetShift(Instant now, ScheduleView view) {
-        Instant shiftStart = null;
-        Instant shiftEnd = null;
-        for (MachineGroupView groupView : view.machineGroups()) {
-            MachineGroup group = toMachineGroup(groupView);
-            var window = ShiftCalendar.shiftWindowContaining(now, group, FactoryZone.ZONE);
-            if (window.isEmpty()) {
-                continue;
-            }
-            Instant start = window.get().start();
-            Instant end = window.get().end();
-            if (shiftStart == null) {
-                shiftStart = start;
-                shiftEnd = end;
-            } else {
-                if (start.isBefore(shiftStart)) {
-                    shiftStart = start;
-                }
-                if (end.isAfter(shiftEnd)) {
-                    shiftEnd = end;
-                }
-            }
-        }
-        if (shiftStart == null || shiftEnd == null) {
-            return new TimelineBounds(
-                    now.minus(Duration.ofHours(2)),
-                    now.plus(Duration.ofHours(10)),
-                    Duration.ofHours(12).getSeconds());
-        }
-        long pad = 300;
-        Instant start = shiftStart.minusSeconds(pad);
-        Instant end = shiftEnd.plusSeconds(pad);
-        return new TimelineBounds(start, end, Duration.between(start, end).getSeconds() + 2 * pad);
+        return "day";
     }
 
     private static TimelineBounds presetDay(Instant now) {
@@ -1484,17 +1289,11 @@ public final class ScheduleHtmlRenderer {
             <script>
             (function(){
               const addOrderForm=document.getElementById('add-order-form');
-              const advanceTimeForm=document.getElementById('advance-time-form');
-              const shiftCloseForm=document.getElementById('shift-close-form');
-              if(!addOrderForm&&!advanceTimeForm&&!shiftCloseForm)return;
+              if(!addOrderForm)return;
 
               const msgEl=document.getElementById('controls-message');
-              let scheduleMeta={nowMs:0,timeZone:'Europe/Moscow'};
               let partCatalog=[];
-              try{scheduleMeta=JSON.parse(document.getElementById('schedule-meta-json').textContent||'{}');}catch(e){}
               try{partCatalog=JSON.parse(document.getElementById('part-catalog-json').textContent||'[]');}catch(e){}
-              const TZ=scheduleMeta.timeZone||'Europe/Moscow';
-              let nowMs=Number(scheduleMeta.nowMs)||Date.now();
 
               function showMsg(text,isError){
                 if(!msgEl)return;
@@ -1503,27 +1302,6 @@ public final class ScheduleHtmlRenderer {
                 msgEl.classList.remove('hidden');
               }
               function hideMsg(){if(msgEl)msgEl.classList.add('hidden');}
-
-              function msToDatetimeLocal(ms){
-                const s=new Date(ms).toLocaleString('sv-SE',{timeZone:TZ,hour12:false});
-                return s.slice(0,16).replace(' ','T');
-              }
-              function datetimeLocalToMs(value){
-                if(!value)return NaN;
-                return Date.parse(value+':00+03:00');
-              }
-              function refreshNowUi(){
-                const label=document.getElementById('sim-now-label');
-                const input=document.getElementById('sim-time-input');
-                if(label)label.textContent=msToDatetimeLocal(nowMs).replace('T',' ');
-                if(input){
-                  input.min=msToDatetimeLocal(nowMs);
-                  if(!input.value||datetimeLocalToMs(input.value)<=nowMs){
-                    input.value=msToDatetimeLocal(nowMs+3600000);
-                  }
-                }
-              }
-              refreshNowUi();
 
               function buildPartSelect(selectedId){
                 const sel=document.createElement('select');
@@ -1587,229 +1365,57 @@ public final class ScheduleHtmlRenderer {
                 }
               }
 
-              if(addOrderForm){
-                addOrderForm.addEventListener('submit',function(ev){
-                  ev.preventDefault();
-                  hideMsg();
-                  const parts=[];
-                  const seen=new Set();
-                  let duplicatePart=false;
-                  document.querySelectorAll('#order-lines .order-line').forEach(function(row){
-                    const pid=row.querySelector('.order-part-select')?.value;
-                    const q=parseInt(row.querySelector('.order-qty-input')?.value||'1',10);
-                    if(!pid)return;
-                    if(seen.has(pid)){
-                      showMsg('Деталь «'+pid+'» указана дважды — объедините в одну строку',true);
-                      duplicatePart=true;
-                      return;
-                    }
-                    seen.add(pid);
-                    parts.push({partId:pid,quantity:q});
-                  });
-                  if(duplicatePart)return;
-                  if(!parts.length){showMsg('Добавьте хотя бы одну деталь',true);return;}
-                  const submitBtn=document.getElementById('order-submit');
-                  if(submitBtn)submitBtn.disabled=true;
-                  fetch('/orders',{
-                    method:'POST',
-                    headers:{'Content-Type':'application/json'},
-                    body:JSON.stringify({parts:parts})
-                  }).then(function(r){
-                    return r.json().then(function(j){return {ok:r.ok,status:r.status,body:j};});
-                  }).then(function(res){
-                    if(submitBtn)submitBtn.disabled=false;
-                    if(!res.ok){
-                      showMsg(res.body&&res.body.error?res.body.error:('Ошибка '+res.status),true);
-                      return;
-                    }
-                    const id=res.body&&res.body.orderId?res.body.orderId:'';
-                    showMsg('Заказ '+(id||'')+' добавлен',false);
-                    setTimeout(function(){location.reload();},600);
-                  }).catch(function(err){
-                    if(submitBtn)submitBtn.disabled=false;
-                    showMsg('Сеть: '+err,true);
-                  });
-                });
-              }
-
-              function advanceToMs(targetMs){
-                if(targetMs<=nowMs){
-                  showMsg('Время можно переводить только вперёд (сейчас '+msToDatetimeLocal(nowMs)+')',true);
-                  return Promise.resolve();
-                }
-                const btn=document.getElementById('time-submit');
-                if(btn)btn.disabled=true;
-                const iso=new Date(targetMs).toISOString();
-                return fetch('/time',{
-                  method:'PUT',
-                  headers:{'Content-Type':'application/json'},
-                  body:JSON.stringify({currentTime:iso})
-                }).then(function(r){
-                  return r.json().then(function(j){return {ok:r.ok,body:j};});
-                }).then(function(res){
-                  if(btn)btn.disabled=false;
-                  if(!res.ok){
-                    showMsg(res.body&&res.body.error?res.body.error:('Ошибка времени'),true);
+              addOrderForm.addEventListener('submit',function(ev){
+                ev.preventDefault();
+                hideMsg();
+                const parts=[];
+                const seen=new Set();
+                let duplicatePart=false;
+                document.querySelectorAll('#order-lines .order-line').forEach(function(row){
+                  const pid=row.querySelector('.order-part-select')?.value;
+                  const q=parseInt(row.querySelector('.order-qty-input')?.value||'1',10);
+                  if(!pid)return;
+                  if(seen.has(pid)){
+                    showMsg('Деталь «'+pid+'» указана дважды — объедините в одну строку',true);
+                    duplicatePart=true;
                     return;
                   }
-                  nowMs=targetMs;
-                  refreshNowUi();
-                  showMsg('Время: '+msToDatetimeLocal(nowMs).replace('T',' '),false);
-                  setTimeout(function(){location.reload();},500);
-                }).catch(function(err){
-                  if(btn)btn.disabled=false;
-                  showMsg('Сеть: '+err,true);
+                  seen.add(pid);
+                  parts.push({partId:pid,quantity:q});
                 });
-              }
-
-              document.querySelectorAll('[data-advance-hours]').forEach(function(btn){
-                btn.addEventListener('click',function(){
-                  hideMsg();
-                  const h=Number(btn.getAttribute('data-advance-hours'))||0;
-                  advanceToMs(nowMs+h*3600000);
+                if(duplicatePart)return;
+                if(!parts.length){showMsg('Добавьте хотя бы одну деталь',true);return;}
+                const submitBtn=document.getElementById('order-submit');
+                if(submitBtn)submitBtn.disabled=true;
+                fetch('/orders',{
+                  method:'POST',
+                  headers:{'Content-Type':'application/json'},
+                  body:JSON.stringify({parts:parts})
+                }).then(function(r){
+                  return r.json().then(function(j){return {ok:r.ok,status:r.status,body:j};});
+                }).then(function(res){
+                  if(submitBtn)submitBtn.disabled=false;
+                  if(!res.ok){
+                    showMsg(res.body&&res.body.error?res.body.error:('Ошибка '+res.status),true);
+                    return;
+                  }
+                  const id=res.body&&res.body.orderId?res.body.orderId:'';
+                  showMsg('Заказ '+(id||'')+' добавлен',false);
+                  setTimeout(function(){location.reload();},600);
+                }).catch(function(err){
+                  if(submitBtn)submitBtn.disabled=false;
+                  showMsg('Сеть: '+err,true);
                 });
               });
 
-              if(advanceTimeForm){
-                advanceTimeForm.addEventListener('submit',function(ev){
-                  ev.preventDefault();
-                  hideMsg();
-                  const input=document.getElementById('sim-time-input');
-                  const targetMs=datetimeLocalToMs(input&&input.value);
-                  if(isNaN(targetMs)){showMsg('Укажите дату и время',true);return;}
-                  advanceToMs(targetMs);
+              document.querySelectorAll('.btn-add-order-jump').forEach(function(btn){
+                btn.addEventListener('click',function(){
+                  setTimeout(function(){
+                    const sel=document.querySelector('#order-lines .order-part-select');
+                    if(sel)sel.focus();
+                  },300);
                 });
-              }
-
-              function formatShiftRange(startIso,endIso){
-                const fmt=function(iso){
-                  const d=new Date(iso);
-                  return d.toLocaleString('ru-RU',{timeZone:TZ,day:'2-digit',month:'2-digit',
-                    hour:'2-digit',minute:'2-digit'});
-                };
-                return fmt(startIso)+' — '+fmt(endIso);
-              }
-
-              function renderShiftContext(ctx){
-                const banner=document.getElementById('shift-stale-banner');
-                const titleEl=document.getElementById('shift-close-title');
-                const tbody=document.getElementById('shift-count-rows');
-                const form=document.getElementById('shift-close-form');
-                if(!ctx||!tbody||!form)return;
-                const rows=ctx.closeRows||[];
-                if(ctx.stale&&banner){
-                  banner.classList.remove('hidden');
-                  banner.textContent='Расписание неактуально: не закрыто смен — '+
-                    ctx.pendingShiftCount+'. Заполните таблицу по всем станкам и закройте смены одной кнопкой.';
-                  document.body.classList.add('schedule-stale');
-                }else if(banner){
-                  banner.classList.add('hidden');
-                  document.body.classList.remove('schedule-stale');
-                }
-                if(!rows.length){
-                  if(titleEl)titleEl.textContent='Нет смен для закрытия';
-                  form.classList.add('hidden');
-                  return;
-                }
-                if(titleEl){
-                  titleEl.textContent='Закрыть смены ('+ctx.pendingShiftCount+'): факты по всем станкам';
-                }
-                tbody.innerHTML='';
-                let maxShiftEnd=null;
-                rows.forEach(function(row){
-                  if(row.shiftEnd&&(!maxShiftEnd||row.shiftEnd>maxShiftEnd))maxShiftEnd=row.shiftEnd;
-                  const tr=document.createElement('tr');
-                  tr.setAttribute('data-group-id',row.groupId);
-                  tr.setAttribute('data-machine-id',row.machineId);
-                  tr.setAttribute('data-task-id',row.taskId);
-                  const shiftHint=formatShiftRange(row.shiftStart,row.shiftEnd);
-                  tr.innerHTML='<td title="'+shiftHint+'">'+row.groupName+'</td><td>'+row.machineTitle+
-                    '</td><td>'+row.taskTitle+'</td><td class="num">'+row.plannedCount+
-                    '</td><td><input type="number" class="shift-done-count" min="0" max="'+
-                    row.plannedCount+'" value="'+row.defaultCompletedCount+'" required></td>';
-                  tbody.appendChild(tr);
-                });
-                form.dataset.shiftEnd=maxShiftEnd||'';
-                form.classList.remove('hidden');
-              }
-
-              function loadShiftContext(){
-                fetch('/shifts/context').then(function(r){return r.json();})
-                  .then(renderShiftContext)
-                  .catch(function(){});
-              }
-              loadShiftContext();
-
-              const addIdleBtn=document.getElementById('add-idle-row');
-              if(addIdleBtn){
-                addIdleBtn.addEventListener('click',function(){
-                  const box=document.getElementById('idle-blocks');
-                  const first=box&&box.querySelector('.idle-row');
-                  if(box&&first)box.appendChild(first.cloneNode(true));
-                });
-              }
-
-              if(shiftCloseForm){
-                shiftCloseForm.addEventListener('submit',function(ev){
-                  ev.preventDefault();
-                  hideMsg();
-                  const machineTaskCounts=[];
-                  shiftCloseForm.querySelectorAll('#shift-count-rows tr[data-machine-id]').forEach(function(row){
-                    const input=row.querySelector('.shift-done-count');
-                    if(!input)return;
-                    machineTaskCounts.push({
-                      groupId:row.getAttribute('data-group-id'),
-                      machineId:row.getAttribute('data-machine-id'),
-                      taskId:row.getAttribute('data-task-id'),
-                      completedCount:Number(input.value)
-                    });
-                  });
-                  if(!machineTaskCounts.length){
-                    showMsg('Нет строк для закрытия смены',true);
-                    return;
-                  }
-                  const idleBlocks=[];
-                  document.querySelectorAll('#idle-blocks .idle-row').forEach(function(row){
-                    const machine=row.querySelector('.idle-machine');
-                    const from=row.querySelector('.idle-from');
-                    const to=row.querySelector('.idle-to');
-                    if(!machine||!from||!to||!from.value||!to.value)return;
-                    idleBlocks.push({
-                      machineId:machine.value,
-                      from:new Date(datetimeLocalToMs(from.value)).toISOString(),
-                      to:new Date(datetimeLocalToMs(to.value)).toISOString(),
-                      reason:'простой'
-                    });
-                  });
-                  const payload={
-                    closeAllPendingShifts:true,
-                    shiftEnd:shiftCloseForm.dataset.shiftEnd||null,
-                    machineTaskCounts:machineTaskCounts,
-                    idleBlocks:idleBlocks
-                  };
-                  const btn=shiftCloseForm.querySelector('button[type=submit]');
-                  if(btn)btn.disabled=true;
-                  fetch('/shifts/close',{
-                    method:'POST',
-                    headers:{'Content-Type':'application/json'},
-                    body:JSON.stringify(payload)
-                  }).then(function(r){
-                    return r.json().then(function(j){return {ok:r.ok,body:j};});
-                  }).then(function(res){
-                    if(btn)btn.disabled=false;
-                    if(!res.ok){
-                      showMsg(res.body&&res.body.error?res.body.error:'Ошибка закрытия смены',true);
-                      return;
-                    }
-                    showMsg('Смены закрыты, перепланировано заказов: '+
-                      (res.body.replannedOrderIds?res.body.replannedOrderIds.length:0),false);
-                    setTimeout(function(){location.reload();},800);
-                  }).catch(function(err){
-                    if(btn)btn.disabled=false;
-                    showMsg('Сеть: '+err,true);
-                  });
-                });
-              }
+              });
             })();
             </script>
             """;
@@ -2404,6 +2010,12 @@ public final class ScheduleHtmlRenderer {
             border-top:1px solid #e0e4e8}\
             .page-nav a{font-size:14px;color:#1565c0;text-decoration:none;font-weight:500}\
             .page-nav a:hover{text-decoration:underline}\
+            .header-actions{margin-top:16px}\
+            .section-head{display:flex;flex-wrap:wrap;align-items:center;gap:12px 20px;\
+            justify-content:space-between;margin-bottom:4px}\
+            .section-head h2{margin:0}\
+            .btn-add-order-jump{text-decoration:none;display:inline-block}\
+            .empty .btn-add-order-jump{font-weight:600}\
             .factory-overview{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;\
             margin-top:12px}\
             .factory-overview-group{background:#fff;border:1px solid #e2e6ea;border-radius:8px;padding:12px 14px;\

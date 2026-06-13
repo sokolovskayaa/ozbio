@@ -21,7 +21,7 @@ class SetupPlannerTest {
     @BeforeEach
     void setUp() {
         Instant t = Instant.parse("2026-05-22T08:00:00Z");
-        store = ScheduleStore.empty(t, true, t);
+        store = ScheduleStore.empty(t);
         milling = store.machines().stream()
                 .filter(m -> m.machineId().equals("ФРЕЗ-ЧПУ-01"))
                 .findFirst()

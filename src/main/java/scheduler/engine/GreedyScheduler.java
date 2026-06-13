@@ -23,33 +23,12 @@ import scheduler.time.CurrentTimeProvider;
 
 public class GreedyScheduler {
     private final CurrentTimeProvider time;
-    private final ReplanContext replanContext;
 
     public GreedyScheduler(CurrentTimeProvider time) {
-        this(time, null);
-    }
-
-    public GreedyScheduler(CurrentTimeProvider time, ReplanContext replanContext) {
         this.time = time;
-        this.replanContext = replanContext;
     }
 
-    /**
-     * Планирует заказ: для каждой детали сначала все штуки проходят операцию 1, затем все —
-     * операцию 2 и т.д.; внутри операции штуки подряд (0 → 1 → 2…). Разные типы деталей
-     * могут идти параллельно на разных станках, если не сдвигается готовность более
-     * приоритетных деталей в заказе. Склейка одинаковых деталей между заказами не выполняется.
-     */
     public void scheduleOrder(Order targetOrder, ScheduleStore store) {
-        scheduleOrder(targetOrder, store, null);
-    }
-
-    public void scheduleOrder(Order targetOrder, ScheduleStore store, ReplanContext context) {
-        GreedyScheduler active = context != null ? new GreedyScheduler(time, context) : this;
-        active.scheduleOrderInternal(targetOrder, store);
-    }
-
-    private void scheduleOrderInternal(Order targetOrder, ScheduleStore store) {
         MachineStateSync.sync(store, time.now());
 
         List<Part> partsByPriority = targetOrder.parts().stream()
@@ -61,11 +40,14 @@ public class GreedyScheduler {
             boolean progressed = false;
 
             Optional<WorkCandidate> primary = nextPrimaryCandidate(targetOrder, partsByPriority, store);
-            if (primary.isPresent()
-                    && isAllowedForEarlierOrders(primary.get(), store)
-                    && isAllowedWithinOrder(primary.get(), store)) {
-                assign(primary.get(), store);
-                progressed = true;
+            if (primary.isPresent()) {
+                Optional<PlannedWork> planned = findBestPlannedWork(primary.get(), store);
+                if (planned.isPresent()
+                        && isAllowedForEarlierOrders(primary.get(), planned.get(), store)
+                        && isAllowedWithinOrder(primary.get(), planned.get(), store)) {
+                    commitPlannedWork(planned.get(), store);
+                    progressed = true;
+                }
             }
 
             if (!progressed && tryAssignParallelLowerPriority(targetOrder, partsByPriority, store)) {
@@ -105,7 +87,6 @@ public class GreedyScheduler {
         return Optional.empty();
     }
 
-    /** Низкоприоритетная деталь на свободном станке, если не сдвигает partReadyAt более приоритетных. */
     private boolean tryAssignParallelLowerPriority(
             Order order, List<Part> partsByPriority, ScheduleStore store) {
         Instant orderStart = ScheduleMetrics.orderStart(order, store, time);
@@ -120,29 +101,25 @@ public class GreedyScheduler {
             }
             WorkCandidate candidate =
                     new WorkCandidate(order, part, ready.get().unitIndex(), ready.get().task());
-            if (!isAllowedWithinOrder(candidate, store) || !isAllowedForEarlierOrders(candidate, store)) {
-                continue;
-            }
-            if (findBestPlannedWork(candidate, store).isPresent()) {
-                assign(candidate, store);
+            Optional<PlannedWork> planned = findBestPlannedWork(candidate, store);
+            if (planned.isPresent()
+                    && isAllowedWithinOrder(candidate, planned.get(), store)
+                    && isAllowedForEarlierOrders(candidate, planned.get(), store)) {
+                commitPlannedWork(planned.get(), store);
                 return true;
             }
         }
         return false;
     }
 
-    private boolean isAllowedWithinOrder(WorkCandidate candidate, ScheduleStore store) {
+    private boolean isAllowedWithinOrder(WorkCandidate candidate, PlannedWork planned, ScheduleStore store) {
         Order order = candidate.order();
         int candidatePriority = PartPriorities.of(store, candidate.part().partId());
         Instant orderStart = ScheduleMetrics.orderStart(order, store, time);
         Map<String, Instant> before = higherPriorityPartReadyAts(
                 order, candidatePriority, store.assignments(), orderStart, store);
 
-        Optional<PlannedWork> simulated = findBestPlannedWork(candidate, store);
-        if (simulated.isEmpty()) {
-            return false;
-        }
-        List<Assignment> withNew = append(store.assignments(), simulated.get());
+        List<Assignment> withNew = append(store.assignments(), planned);
         for (Map.Entry<String, Instant> entry : before.entrySet()) {
             Instant after = partReadyAtOrStart(
                     order.orderId(), entry.getKey(), withNew, orderStart);
@@ -180,17 +157,13 @@ public class GreedyScheduler {
                 .orElse(orderStart);
     }
 
-    private boolean isAllowedForEarlierOrders(WorkCandidate candidate, ScheduleStore store) {
+    private boolean isAllowedForEarlierOrders(WorkCandidate candidate, PlannedWork planned, ScheduleStore store) {
         for (Order other : store.orders()) {
             if (other.priority() <= candidate.order().priority()) {
                 continue;
             }
             Instant before = currentReadyAt(other.orderId(), store);
-            Optional<PlannedWork> simulated = findBestPlannedWork(candidate, store);
-            if (simulated.isEmpty()) {
-                return false;
-            }
-            List<Assignment> withNew = append(store.assignments(), simulated.get());
+            List<Assignment> withNew = append(store.assignments(), planned);
             Instant after = ScheduleMetrics.readyAt(other.orderId(), withNew);
             if (after.isAfter(before)) {
                 return false;
@@ -199,20 +172,9 @@ public class GreedyScheduler {
         return true;
     }
 
-    private void assign(WorkCandidate candidate, ScheduleStore store) {
-        PlannedWork planned = findBestPlannedWork(candidate, store)
-                .orElseThrow(() -> new SchedulingException(
-                        "No capable machine for task " + candidate.task().taskId()));
-        commitPlannedWork(planned, store);
-    }
-
     private Optional<PlannedWork> findBestPlannedWork(WorkCandidate candidate, ScheduleStore store) {
         PlannedWork best = null;
-        List<Machine> machines = capableMachines(candidate.task(), store);
-        if (replanContext != null) {
-            machines = filterPreferredMachine(candidate, machines);
-        }
-        for (Machine machine : machines) {
+        for (Machine machine : capableMachines(candidate.task(), store)) {
             Optional<PlannedWork> tentative = planWork(candidate, machine, store);
             if (tentative.isEmpty()) {
                 continue;
@@ -228,24 +190,11 @@ public class GreedyScheduler {
         return Optional.ofNullable(best);
     }
 
-    private List<Machine> filterPreferredMachine(WorkCandidate candidate, List<Machine> machines) {
-        return replanContext
-                .preferredMachine(
-                        candidate.order().orderId(),
-                        candidate.part().partId(),
-                        candidate.unitIndex(),
-                        candidate.task().taskId())
-                .map(pref -> machines.stream().filter(m -> m.machineId().equals(pref)).toList())
-                .filter(list -> !list.isEmpty())
-                .orElse(machines);
-    }
-
     private Optional<PlannedWork> planWork(WorkCandidate candidate, Machine machine, ScheduleStore store) {
         Order order = candidate.order();
         Part part = candidate.part();
         Task task = candidate.task();
         int unitIndex = candidate.unitIndex();
-        MachineGroup group = store.findGroupForMachine(machine).orElse(null);
 
         Instant orderStart = ScheduleMetrics.orderStart(order, store, time);
         Instant prevEnd = ScheduleMetrics.previousTaskEnd(
@@ -258,15 +207,15 @@ public class GreedyScheduler {
                 store,
                 machine.machineId());
         Duration setup = SetupPlanner.setupBeforeTask(machine, part.partId(), task.taskId(), store);
-        Instant machineAvailable = MachineTimeline.afterBlocks(
-                store, machine.machineId(), MachineTimeline.availableFrom(store, machine.machineId(), time.now()));
-        Optional<WorkTiming> timing = planWorkTimingWithContiguousSetup(
-                max(prevEnd, orderStart), machineAvailable, setup, task.duration(), group, store, machine.machineId());
+        Instant machineAvailable = MachineTimeline.availableFrom(store, machine.machineId(), time.now());
+        Instant anchor = max(prevEnd, orderStart, machineAvailable);
+
+        Optional<WorkTiming> timing = planWorkTiming(anchor, setup, task.duration());
         if (timing.isEmpty()) {
             return Optional.empty();
         }
-        Optional<Assignment> setupAssignment = Optional.empty();
         WorkTiming planned = timing.get();
+        Optional<Assignment> setupAssignment = Optional.empty();
         if (planned.setupStart().isPresent()) {
             setupAssignment = Optional.of(Assignment.planned(
                     UUID.randomUUID().toString(),
@@ -279,9 +228,6 @@ public class GreedyScheduler {
                     planned.setupStart().get(),
                     planned.setupEnd().get()));
         }
-        Instant workStart = planned.workStart();
-        Instant workEnd = planned.workEnd();
-
         Assignment work = Assignment.planned(
                 UUID.randomUUID().toString(),
                 order.orderId(),
@@ -290,10 +236,23 @@ public class GreedyScheduler {
                 task.taskId(),
                 task.sequence(),
                 machine.machineId(),
-                workStart,
-                workEnd);
+                planned.workStart(),
+                planned.workEnd());
 
         return Optional.of(new PlannedWork(setupAssignment, work));
+    }
+
+    private static Optional<WorkTiming> planWorkTiming(Instant anchor, Duration setup, Duration work) {
+        if (setup.isZero()) {
+            return Optional.of(new WorkTiming(
+                    Optional.empty(), Optional.empty(), anchor, anchor.plus(work)));
+        }
+        Instant setupStart = anchor;
+        Instant setupEnd = setupStart.plus(setup);
+        Instant workStart = setupEnd;
+        Instant workEnd = workStart.plus(work);
+        return Optional.of(new WorkTiming(
+                Optional.of(setupStart), Optional.of(setupEnd), workStart, workEnd));
     }
 
     private void commitPlannedWork(PlannedWork planned, ScheduleStore store) {
@@ -303,14 +262,7 @@ public class GreedyScheduler {
 
     private void commitAssignment(Assignment assignment, ScheduleStore store) {
         store.addAssignment(assignment);
-        store.machines().stream()
-                .filter(m -> m.machineId().equals(assignment.machineId()))
-                .findFirst()
-                .ifPresent(m -> {
-                    if (assignment.plannedEnd().isAfter(m.availableAt())) {
-                        m.setAvailableAt(assignment.plannedEnd());
-                    }
-                });
+        store.updateMachineAvailability(assignment.machineId(), assignment.plannedEnd());
     }
 
     private List<Machine> capableMachines(Task task, ScheduleStore store) {
@@ -346,70 +298,6 @@ public class GreedyScheduler {
         planned.setup().ifPresent(copy::add);
         copy.add(planned.work());
         return copy;
-    }
-
-    /**
-     * Старт обработки не раньше {@code productionEarliest}; переналадка заканчивается
-     * ровно в {@code workStart} (без разрыва). Планирование вперёд: в одной смене укладываются
-     * переналадка + работа (обратный {@code subtractWorkDuration} давал start &gt; end).
-     */
-    private static Optional<WorkTiming> planWorkTimingWithContiguousSetup(
-            Instant productionEarliest,
-            Instant machineAvailable,
-            Duration setup,
-            Duration work,
-            MachineGroup group,
-            ScheduleStore store,
-            String machineId) {
-        java.time.ZoneId zone = FactoryZone.ZONE;
-        Instant anchor = MachineTimeline.afterBlocks(
-                store, machineId, max(productionEarliest, machineAvailable));
-        if (setup.isZero()) {
-            Optional<Instant> workStart = ShiftCalendar.nextShiftStartFittingDuration(anchor, work, group, zone);
-            if (workStart.isEmpty()) {
-                return Optional.empty();
-            }
-            Instant start = workStart.get();
-            if (start.isBefore(productionEarliest)) {
-                Optional<Instant> later = ShiftCalendar.nextShiftStartFittingDuration(
-                        productionEarliest, work, group, zone);
-                if (later.isEmpty()) {
-                    return Optional.empty();
-                }
-                start = later.get();
-            }
-            return Optional.of(new WorkTiming(
-                    Optional.empty(),
-                    Optional.empty(),
-                    start,
-                    ShiftCalendar.addWorkDuration(start, work, group, zone)));
-        }
-        Duration block = setup.plus(work);
-        Instant cursor = anchor;
-        for (int guard = 0; guard < 500; guard++) {
-            Instant searchFrom = MachineTimeline.afterBlocks(store, machineId, max(cursor, machineAvailable));
-            Optional<Instant> setupStartOpt =
-                    ShiftCalendar.nextShiftStartFittingDuration(searchFrom, block, group, zone);
-            if (setupStartOpt.isEmpty()) {
-                return Optional.empty();
-            }
-            Instant setupStart = setupStartOpt.get();
-            Instant setupEnd = ShiftCalendar.addWorkDuration(setupStart, setup, group, zone);
-            Instant workStart = setupEnd;
-            if (workStart.isBefore(productionEarliest)) {
-                cursor = ShiftCalendar.nextWorkStart(productionEarliest, group, zone);
-                continue;
-            }
-            Instant workEnd = ShiftCalendar.addWorkDuration(workStart, work, group, zone);
-            if (!setupStart.isBefore(setupEnd) || workStart.isAfter(workEnd)) {
-                cursor = ShiftCalendar.nextWorkStart(
-                        ShiftCalendar.currentShiftEnd(setupStart, group, zone), group, zone);
-                continue;
-            }
-            return Optional.of(new WorkTiming(
-                    Optional.of(setupStart), Optional.of(setupEnd), workStart, workEnd));
-        }
-        return Optional.empty();
     }
 
     private record WorkTiming(

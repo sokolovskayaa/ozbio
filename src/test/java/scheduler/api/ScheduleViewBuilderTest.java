@@ -15,13 +15,13 @@ import scheduler.model.Part;
 import scheduler.model.Task;
 import scheduler.store.PartDefinition;
 import scheduler.store.ScheduleStore;
-import scheduler.time.StoreCurrentTimeProvider;
+import scheduler.time.FixedTimeProvider;
 
 class ScheduleViewBuilderTest {
     @Test
     void build_excludesCancelledAssignments() {
         Instant factory = Instant.parse("2026-05-22T08:00:00Z");
-        ScheduleStore store = ScheduleStore.empty(factory, true, factory);
+        ScheduleStore store = ScheduleStore.empty(factory);
         store.setPartDefinition(
                 "P1",
                 new PartDefinition(
@@ -50,7 +50,7 @@ class ScheduleViewBuilderTest {
                 null,
                 null));
 
-        ScheduleView view = ScheduleViewBuilder.build(store, new StoreCurrentTimeProvider(store));
+        ScheduleView view = ScheduleViewBuilder.build(store, new FixedTimeProvider(factory));
         long inView = view.orders().stream()
                 .flatMap(o -> o.parts().stream())
                 .flatMap(p -> p.assignments().stream())

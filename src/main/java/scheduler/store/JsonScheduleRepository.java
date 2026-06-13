@@ -27,7 +27,7 @@ public class JsonScheduleRepository {
         if (!Files.exists(filePath)) {
             Files.createDirectories(filePath.getParent());
             Instant now = Instant.now();
-            ScheduleStore store = ScheduleStore.empty(now, true, now);
+            ScheduleStore store = ScheduleStore.empty(now);
             seedDefaultPartDefinitions(store);
             save(store);
             return store;
@@ -35,8 +35,7 @@ public class JsonScheduleRepository {
         String json = Files.readString(filePath);
         ScheduleSnapshot snapshot = gson.fromJson(json, ScheduleSnapshot.class);
         if (snapshot == null || snapshot.factoryStartedAt == null) {
-            Instant now = Instant.now();
-            return ScheduleStore.empty(now, true, now);
+            return ScheduleStore.empty(Instant.now());
         }
         return ScheduleStore.fromSnapshot(snapshot);
     }

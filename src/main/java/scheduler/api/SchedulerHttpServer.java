@@ -27,11 +27,6 @@ public class SchedulerHttpServer {
         server.createContext("/schedule", this::handleSchedule);
         server.createContext("/schedule.html", this::handleScheduleHtml);
         server.createContext("/orders", this::handleOrders);
-        server.createContext("/time", this::handleTime);
-        server.createContext("/machines", this::handleMachines);
-        server.createContext("/machine-groups", this::handleMachineGroups);
-        server.createContext("/shifts/context", this::handleShiftContext);
-        server.createContext("/shifts/close", this::handleShiftClose);
     }
 
     public void start() {
@@ -39,26 +34,40 @@ public class SchedulerHttpServer {
     }
 
     private void handleSchedule(HttpExchange exchange) throws IOException {
+        if (handleOptions(exchange)) {
+            return;
+        }
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendJson(exchange, 405, "{\"error\":\"Method Not Allowed\"}");
             return;
         }
-        ScheduleView view = buildScheduleView();
-        if (wantsHtml(exchange)) {
-            sendHtml(exchange, 200, ScheduleHtmlRenderer.render(view), false);
-            return;
+        try {
+            ScheduleView view = buildScheduleView();
+            if (wantsHtml(exchange)) {
+                sendHtml(exchange, 200, ScheduleHtmlRenderer.render(view), false);
+                return;
+            }
+            sendJson(exchange, 200, GSON.toJson(view));
+        } catch (IOException e) {
+            sendJson(exchange, 500, "{\"error\":\"Internal server error\"}");
         }
-        sendJson(exchange, 200, GSON.toJson(view));
     }
 
     private void handleScheduleHtml(HttpExchange exchange) throws IOException {
+        if (handleOptions(exchange)) {
+            return;
+        }
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendJson(exchange, 405, "{\"error\":\"Method Not Allowed\"}");
             return;
         }
-        ScheduleView view = buildScheduleView();
-        boolean download = queryParam(exchange.getRequestURI(), "download").map("true"::equalsIgnoreCase).orElse(true);
-        sendHtml(exchange, 200, ScheduleHtmlRenderer.render(view), download);
+        try {
+            ScheduleView view = buildScheduleView();
+            boolean download = queryParam(exchange.getRequestURI(), "download").map("true"::equalsIgnoreCase).orElse(true);
+            sendHtml(exchange, 200, ScheduleHtmlRenderer.render(view), download);
+        } catch (IOException e) {
+            sendJson(exchange, 500, "{\"error\":\"Internal server error\"}");
+        }
     }
 
     private ScheduleView buildScheduleView() {
@@ -90,33 +99,10 @@ public class SchedulerHttpServer {
         return java.util.Optional.empty();
     }
 
-    private void handleShiftContext(HttpExchange exchange) throws IOException {
-        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendJson(exchange, 405, "{\"error\":\"Method Not Allowed\"}");
-            return;
-        }
-        sendJson(exchange, 200, GSON.toJson(schedulerService.shiftContext()));
-    }
-
-    private void handleShiftClose(HttpExchange exchange) throws IOException {
-        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendJson(exchange, 405, "{\"error\":\"Method Not Allowed\"}");
-            return;
-        }
-        try {
-            ShiftCloseRequest request = GSON.fromJson(readBody(exchange), ShiftCloseRequest.class);
-            if (request == null) {
-                sendJson(exchange, 400, "{\"error\":\"Request body is required\"}");
-                return;
-            }
-            var result = schedulerService.closeShift(request);
-            sendJson(exchange, 200, GSON.toJson(result));
-        } catch (SchedulingException e) {
-            sendJson(exchange, 400, "{\"error\":\"" + escapeJson(e.getMessage()) + "\"}");
-        }
-    }
-
     private void handleOrders(HttpExchange exchange) throws IOException {
+        if (handleOptions(exchange)) {
+            return;
+        }
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             sendJson(exchange, 405, "{\"error\":\"Method Not Allowed\"}");
             return;
@@ -128,77 +114,8 @@ public class SchedulerHttpServer {
             sendJson(exchange, 201, GSON.toJson(result));
         } catch (SchedulingException e) {
             sendJson(exchange, 400, "{\"error\":\"" + escapeJson(e.getMessage()) + "\"}");
-        }
-    }
-
-    private void handleTime(HttpExchange exchange) throws IOException {
-        if (!"PUT".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendJson(exchange, 405, "{\"error\":\"Method Not Allowed\"}");
-            return;
-        }
-        try {
-            TimeUpdateRequest request = GSON.fromJson(readBody(exchange), TimeUpdateRequest.class);
-            if (request == null || request.currentTime() == null) {
-                sendJson(exchange, 400, "{\"error\":\"currentTime is required\"}");
-                return;
-            }
-            schedulerService.setSimulationTime(request.currentTime());
-            sendJson(exchange, 200, GSON.toJson(new TimeUpdateRequest(schedulerService.time().now())));
-        } catch (SchedulingException e) {
-            sendJson(exchange, 400, "{\"error\":\"" + escapeJson(e.getMessage()) + "\"}");
-        }
-    }
-
-    private void handleMachineGroups(HttpExchange exchange) throws IOException {
-        String path = exchange.getRequestURI().getPath();
-        String[] segments = path.split("/");
-        if (segments.length < 3 || segments[2].isBlank()) {
-            sendJson(exchange, 404, "{\"error\":\"Group id required: /machine-groups/{id}\"}");
-            return;
-        }
-        String groupId = segments[2];
-        if (!"PUT".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendJson(exchange, 405, "{\"error\":\"Method Not Allowed\"}");
-            return;
-        }
-        try {
-            MachineGroupUpdateRequest request =
-                    GSON.fromJson(readBody(exchange), MachineGroupUpdateRequest.class);
-            if (request == null) {
-                sendJson(exchange, 400, "{\"error\":\"Request body is required\"}");
-                return;
-            }
-            schedulerService.updateMachineGroup(groupId, request);
-            sendJson(exchange, 200, "{\"groupId\":\"" + escapeJson(groupId) + "\",\"updated\":true}");
-        } catch (IllegalArgumentException e) {
-            sendJson(exchange, 404, "{\"error\":\"" + escapeJson(e.getMessage()) + "\"}");
-        }
-    }
-
-    private void handleMachines(HttpExchange exchange) throws IOException {
-        String path = exchange.getRequestURI().getPath();
-        // /machines/{machineId}
-        String[] segments = path.split("/");
-        if (segments.length < 3 || segments[2].isBlank()) {
-            sendJson(exchange, 404, "{\"error\":\"Machine id required: /machines/{id}\"}");
-            return;
-        }
-        String machineId = segments[2];
-        if (!"PATCH".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendJson(exchange, 405, "{\"error\":\"Method Not Allowed\"}");
-            return;
-        }
-        try {
-            MachineStatusUpdateRequest request =
-                    GSON.fromJson(readBody(exchange), MachineStatusUpdateRequest.class);
-            if (request == null || request.status() == null) {
-                sendJson(exchange, 400, "{\"error\":\"status is required\"}");
-                return;
-            }
-            schedulerService.setMachineStatus(machineId, request.status());
-            sendJson(exchange, 200, "{\"machineId\":\"" + machineId + "\",\"status\":\"" + request.status() + "\"}");
-        } catch (IllegalArgumentException e) {
-            sendJson(exchange, 404, "{\"error\":\"" + escapeJson(e.getMessage()) + "\"}");
+        } catch (IOException e) {
+            sendJson(exchange, 500, "{\"error\":\"Internal server error\"}");
         }
     }
 
@@ -208,7 +125,23 @@ public class SchedulerHttpServer {
         }
     }
 
+    private static boolean handleOptions(HttpExchange exchange) throws IOException {
+        addCorsHeaders(exchange);
+        if ("OPTIONS".equalsIgnoreCase(exchange.getRequestMethod())) {
+            exchange.sendResponseHeaders(204, -1);
+            return true;
+        }
+        return false;
+    }
+
+    private static void addCorsHeaders(HttpExchange exchange) {
+        exchange.getResponseHeaders().add("Access-Control-Allow-Origin", "*");
+        exchange.getResponseHeaders().add("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+        exchange.getResponseHeaders().add("Access-Control-Allow-Headers", "Content-Type");
+    }
+
     private static void sendJson(HttpExchange exchange, int status, String body) throws IOException {
+        addCorsHeaders(exchange);
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
         exchange.sendResponseHeaders(status, bytes.length);
@@ -219,6 +152,7 @@ public class SchedulerHttpServer {
 
     private static void sendHtml(HttpExchange exchange, int status, String body, boolean asDownload)
             throws IOException {
+        addCorsHeaders(exchange);
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
         exchange.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
         if (asDownload) {

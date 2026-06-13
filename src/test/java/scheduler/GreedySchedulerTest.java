@@ -17,7 +17,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import scheduler.api.OrderPartRequest;
 import scheduler.api.OrderRequest;
-import scheduler.engine.BatchOverlap;
 import scheduler.engine.OrderPriorities;
 import scheduler.engine.ScheduleMetrics;
 import scheduler.model.Order;
@@ -32,7 +31,7 @@ import scheduler.store.JsonScheduleRepository;
 import scheduler.store.PartDefinition;
 import scheduler.store.ScheduleStore;
 import scheduler.model.Task;
-import scheduler.time.StoreCurrentTimeProvider;
+import scheduler.time.FixedTimeProvider;
 
 class GreedySchedulerTest {
     @TempDir
@@ -45,10 +44,10 @@ class GreedySchedulerTest {
     @BeforeEach
     void setUp() throws IOException {
         factoryStart = Instant.parse("2026-05-22T08:00:00Z");
-        store = ScheduleStore.empty(factoryStart, true, factoryStart);
+        store = ScheduleStore.empty(factoryStart);
         seedPartCatalog(store);
         JsonScheduleRepository repository = new JsonScheduleRepository(tempDir.resolve("schedule.json"));
-        service = new SchedulerService(store, repository, new StoreCurrentTimeProvider(store));
+        service = new SchedulerService(store, repository, new FixedTimeProvider(factoryStart));
     }
 
     private static void seedPartCatalog(ScheduleStore store) {
@@ -92,25 +91,22 @@ class GreedySchedulerTest {
     }
 
     @Test
-    void addOrder_operationTooLongForShiftTail_startsNextWorkDay() throws IOException {
+    void addOrder_machineBusyUntilLate_startsAfterAvailability() throws IOException {
         store.setPartDefinition(
                 "P-tail",
                 new PartDefinition(10, List.of(new Task("T1", 0, Duration.ofMinutes(70), Capability.MILLING))));
         Instant lateFriday =
                 ZonedDateTime.of(2026, 5, 22, 19, 30, 0, 0, FactoryZone.ZONE).toInstant();
         store.findMachine("ФРЕЗ-ЧПУ-01").setAvailableAt(lateFriday);
-        service.setSimulationTime(lateFriday);
 
         AddOrderResult result = service.addOrder(new OrderRequest("O1", List.of(line("P-tail"))));
 
-        Instant expectedMonday =
-                ZonedDateTime.of(2026, 5, 25, 8, 30, 0, 0, FactoryZone.ZONE).toInstant();
         Instant workStart = result.assignmentsForOrder().stream()
                 .filter(a -> !SetupIntervals.isSetup(a.taskId()))
                 .map(a -> a.plannedStart())
                 .findFirst()
                 .orElseThrow();
-        assertEquals(expectedMonday, workStart);
+        assertTrue(!workStart.isBefore(lateFriday));
     }
 
     @Test
@@ -233,48 +229,6 @@ class GreedySchedulerTest {
     }
 
     @Test
-    void addOrder_secondOpStartsBeforeBatchEndsOnPrevMachine() throws IOException {
-        store.setOverlapBatchesEnabled(true);
-        AddOrderResult result = service.addOrder(new OrderRequest("O2", List.of(line("P-overlap", 10))));
-
-        Instant lastMillEnd = result.assignmentsForOrder().stream()
-                .filter(a -> a.taskId().equals("T-mill"))
-                .map(a -> a.plannedEnd())
-                .max(Instant::compareTo)
-                .orElseThrow();
-        Instant firstTurnStart = result.assignmentsForOrder().stream()
-                .filter(a -> a.taskId().equals("T-turn"))
-                .map(a -> a.plannedStart())
-                .min(Instant::compareTo)
-                .orElseThrow();
-        assertTrue(firstTurnStart.isBefore(lastMillEnd));
-
-        Order order = store.findOrder("O2").orElseThrow();
-        Part overlapPart = store.createPart("P-overlap", 10);
-        Instant expectedMin =
-                BatchOverlap.earliestPackageStartForContinuousFeed(
-                        order,
-                        overlapPart,
-                        1,
-                        result.assignmentsForOrder(),
-                        factoryStart);
-        assertTrue(
-                !firstTurnStart.isBefore(expectedMin),
-                "Старт токарки не раньше минимума по штукам/непрерывности");
-        Instant turn0Start = result.assignmentsForOrder().stream()
-                .filter(a -> a.taskId().equals("T-turn") && a.unitIndex() == 0)
-                .map(a -> a.plannedStart())
-                .findFirst()
-                .orElseThrow();
-        Instant mill0End = result.assignmentsForOrder().stream()
-                .filter(a -> a.taskId().equals("T-mill") && a.unitIndex() == 0)
-                .map(a -> a.plannedEnd())
-                .findFirst()
-                .orElseThrow();
-        assertTrue(!turn0Start.isBefore(mill0End), "токарка шт.0 не раньше конца фрезы шт.0");
-    }
-
-    @Test
     void addOrder_setupEndsWhenWorkStarts() throws IOException {
         AddOrderResult result = service.addOrder(new OrderRequest("O3", List.of(line("P-overlap", 2))));
 
@@ -330,75 +284,6 @@ class GreedySchedulerTest {
                     !t2Start.isBefore(t1End),
                     () -> "T2 шт." + u + " не раньше конца T1 шт." + u);
         }
-    }
-
-    @Test
-    void addOrder_priorityDerivedFromCreatedAt() throws IOException {
-        service.addOrder(new OrderRequest("O1", List.of(line("P1"))));
-        Instant later = factoryStart.plus(Duration.ofHours(1));
-        service.setSimulationTime(later);
-        service.addOrder(new OrderRequest("O2", List.of(line("P2"))));
-
-        int p1 = store.orders().stream()
-                .filter(o -> o.orderId().equals("O1"))
-                .findFirst()
-                .orElseThrow()
-                .priority();
-        int p2 = store.orders().stream()
-                .filter(o -> o.orderId().equals("O2"))
-                .findFirst()
-                .orElseThrow()
-                .priority();
-        assertTrue(p1 > p2, "более ранний заказ должен иметь больший приоритет");
-        assertEquals(OrderPriorities.fromCreatedAt(factoryStart), p1);
-    }
-
-    @Test
-    void addOrder_createdAtIsCurrentSimulationTime() throws IOException {
-        service.addOrder(new OrderRequest("O1", List.of(line("P1"))));
-
-        Instant later = factoryStart.plus(Duration.ofHours(2));
-        service.setSimulationTime(later);
-
-        service.addOrder(new OrderRequest("O2", List.of(line("P2"))));
-
-        Instant o2Created = store.orders().stream()
-                .filter(o -> o.orderId().equals("O2"))
-                .findFirst()
-                .orElseThrow()
-                .createdAt();
-        assertEquals(later, o2Created);
-    }
-
-    @Test
-    void setSimulationTime_rejectsBackward() throws IOException {
-        Instant later = factoryStart.plus(Duration.ofHours(2));
-        service.setSimulationTime(later);
-
-        Instant earlier = factoryStart.plus(Duration.ofHours(1));
-        SchedulingException ex =
-                assertThrows(SchedulingException.class, () -> service.setSimulationTime(earlier));
-        assertTrue(ex.getMessage().contains("only move forward"));
-    }
-
-    @Test
-    void simulationTime_advanceThenNewOrderUsesNewTimeline() throws IOException {
-        service.addOrder(new OrderRequest("O1", List.of(line("P1"))));
-
-        Instant later = factoryStart.plus(Duration.ofHours(2));
-        service.setSimulationTime(later);
-
-        AddOrderResult r2 = service.addOrder(new OrderRequest("O2", List.of(line("P2"))));
-
-        assertEquals(later.plus(Duration.ofMinutes(60)), r2.readyAt());
-        assertTrue(r2.assignmentsForOrder().getFirst().plannedStart().compareTo(later) >= 0);
-    }
-
-    @Test
-    void machineDown_blocksScheduling() throws IOException {
-        service.setMachineStatus("ТОКАР-ЧПУ-02", MachineStatus.DOWN);
-
-        assertThrows(SchedulingException.class, () -> service.addOrder(new OrderRequest("O1", List.of(line("P1")))));
     }
 
     @Test

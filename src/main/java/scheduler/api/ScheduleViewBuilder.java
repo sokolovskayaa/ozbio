@@ -2,6 +2,8 @@ package scheduler.api;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -12,17 +14,23 @@ import scheduler.model.Assignment;
 import scheduler.model.MachineGroup;
 import scheduler.model.Order;
 import scheduler.model.Part;
-import scheduler.model.WorkWindow;
 import scheduler.store.ScheduleStore;
 import scheduler.time.CurrentTimeProvider;
 
 public final class ScheduleViewBuilder {
+    private static final DateTimeFormatter FMT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.of("Europe/Moscow"));
+
     private ScheduleViewBuilder() {}
 
     public static ScheduleView build(ScheduleStore store, CurrentTimeProvider time) {
         List<MachineGroupView> groups = store.machineGroups().values().stream()
                 .sorted(Comparator.comparing(MachineGroup::groupId))
-                .map(ScheduleViewBuilder::toGroupView)
+                .map(g -> new MachineGroupView(
+                        g.groupId(),
+                        g.name(),
+                        List.of(),
+                        g.setupDuration().toString()))
                 .toList();
 
         List<MachineView> machines = store.machines().stream()
@@ -72,37 +80,19 @@ public final class ScheduleViewBuilder {
                     order.orderId(), order.createdAt(), order.priority(), orderReady, parts));
         }
 
-        ClockView clock = new ClockView(time.isSimulation(), time.now());
         List<PartCatalogView> catalog = store.partDefinitions().entrySet().stream()
                 .sorted((a, b) -> Integer.compare(b.getValue().priority(), a.getValue().priority()))
                 .map(e -> toCatalogView(e.getKey(), e.getValue()))
                 .toList();
-        return new ScheduleView(store.factoryStartedAt(), clock, time.now(), catalog, groups, machines, orders);
-    }
-
-    private static MachineGroupView toGroupView(MachineGroup group) {
-        List<WorkWindowView> windows = group.workWindows().stream()
-                .sorted(Comparator.comparing(WorkWindow::dayOfWeek).thenComparing(WorkWindow::start))
-                .map(w -> new WorkWindowView(
-                        dayLabel(w.dayOfWeek()),
-                        w.dayOfWeek().name(),
-                        w.start().toString(),
-                        w.end().toString()))
-                .toList();
-        return new MachineGroupView(
-                group.groupId(), group.name(), windows, group.setupDuration().toString());
-    }
-
-    private static String dayLabel(java.time.DayOfWeek day) {
-        return switch (day) {
-            case MONDAY -> "Пн";
-            case TUESDAY -> "Вт";
-            case WEDNESDAY -> "Ср";
-            case THURSDAY -> "Чт";
-            case FRIDAY -> "Пт";
-            case SATURDAY -> "Сб";
-            case SUNDAY -> "Вс";
-        };
+        Instant now = time.now();
+        return new ScheduleView(
+                store.factoryStartedAt(),
+                new ClockView(false, now),
+                now,
+                catalog,
+                groups,
+                machines,
+                orders);
     }
 
     private static PartCatalogView toCatalogView(String partId, PartDefinition def) {
@@ -130,5 +120,9 @@ public final class ScheduleViewBuilder {
                 a.status().name(),
                 a.actualStart(),
                 a.actualEnd());
+    }
+
+    static String formatInstant(Instant instant) {
+        return instant == null ? "" : FMT.format(instant);
     }
 }
