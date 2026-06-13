@@ -58,8 +58,19 @@ fi
 
 run_psql -c "GRANT ALL PRIVILEGES ON DATABASE ozbio TO ozbio;"
 
+run_psql -d ozbio <<'SQL'
+CREATE SCHEMA IF NOT EXISTS testing;
+CREATE SCHEMA IF NOT EXISTS production;
+GRANT ALL ON SCHEMA testing TO ozbio;
+GRANT ALL ON SCHEMA production TO ozbio;
+ALTER DEFAULT PRIVILEGES IN SCHEMA testing GRANT ALL ON TABLES TO ozbio;
+ALTER DEFAULT PRIVILEGES IN SCHEMA production GRANT ALL ON TABLES TO ozbio;
+SQL
+
 echo ""
-echo "OK. Запуск приложения:"
-echo "  mvn spring-boot:run"
+echo "OK. Схемы: testing, production"
+echo "  cp .env.example .env"
+echo "  APP_DB_SCHEMA=testing  mvn spring-boot:run"
+echo "  APP_DB_SCHEMA=production LIQUIBASE_CONTEXTS=  mvn spring-boot:run"
 echo ""
-echo "URL: jdbc:postgresql://${PSQL_HOST}:${PSQL_PORT}/ozbio  user=ozbio"
+echo "URL: jdbc:postgresql://${PSQL_HOST}:${PSQL_PORT}/ozbio?currentSchema=testing  user=ozbio"

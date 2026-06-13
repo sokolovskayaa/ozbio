@@ -21,9 +21,7 @@ import scheduler.model.schedule.SetupIntervals;
 import java.util.Comparator;
 import scheduler.service.AddOrderResult;
 import scheduler.service.SchedulerService;
-import scheduler.store.ScheduleRepository;
 import scheduler.store.json.JsonScheduleRepository;
-import scheduler.store.core.ScheduleStore;
 import scheduler.time.FixedTimeProvider;
 
 /**
@@ -43,7 +41,6 @@ class DemoScheduleTest {
     Path tempDir;
 
     private SchedulerService service;
-    private ScheduleStore store;
     private Instant factoryStart;
 
     @BeforeEach
@@ -51,9 +48,9 @@ class DemoScheduleTest {
         Path example = Path.of("data/schedule.json.example");
         Path scheduleFile = tempDir.resolve("schedule.json");
         Files.copy(example, scheduleFile);
-        store = new JsonScheduleRepository(scheduleFile).loadOrCreate();
-        factoryStart = store.factoryStartedAt();
-        service = new SchedulerService(store, new JsonScheduleRepository(scheduleFile), new FixedTimeProvider(factoryStart));
+        JsonScheduleRepository repository = new JsonScheduleRepository(scheduleFile);
+        factoryStart = repository.factoryStartedAt();
+        service = new SchedulerService(repository, new FixedTimeProvider(factoryStart));
     }
 
     @Test

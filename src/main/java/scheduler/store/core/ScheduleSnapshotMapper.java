@@ -24,12 +24,8 @@ public final class ScheduleSnapshotMapper {
                 }
             });
         }
-        if (store.machineGroupsEmpty()) {
-            store.putAllMachineGroups(DemoFactoryCatalog.defaultMachineGroups());
-        }
         if (snapshot.machines != null) {
-            snapshot.machines.forEach(
-                    m -> store.addMachine(m.toMachine(DemoFactoryCatalog.defaultGroupForMachine(m.machineId()))));
+            snapshot.machines.forEach(m -> store.addMachine(m.toMachine(m.groupId())));
         }
         if (snapshot.orders != null) {
             snapshot.orders.stream().map(ScheduleSnapshotMapper::normalizeOrder).forEach(store::addOrderRaw);
@@ -46,9 +42,6 @@ public final class ScheduleSnapshotMapper {
                     store.putPartDefinitionRaw(id, new PartDefinition(def.priority, def.tasks));
                 }
             });
-        }
-        if (store.machinesEmpty()) {
-            DemoFactoryCatalog.defaultMachines(store.factoryStartedAt()).forEach(store::addMachine);
         }
         return store;
     }

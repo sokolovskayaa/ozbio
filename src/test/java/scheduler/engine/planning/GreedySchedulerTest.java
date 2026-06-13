@@ -27,7 +27,6 @@ import scheduler.model.schedule.SetupIntervals;
 import scheduler.service.AddOrderResult;
 import scheduler.service.SchedulerService;
 import scheduler.service.SchedulingException;
-import scheduler.store.ScheduleRepository;
 import scheduler.store.json.JsonScheduleRepository;
 import scheduler.store.core.PartDefinition;
 import scheduler.store.core.ScheduleStore;
@@ -38,17 +37,22 @@ class GreedySchedulerTest {
     @TempDir
     Path tempDir;
 
+    private JsonScheduleRepository repository;
     private SchedulerService service;
-    private ScheduleStore store;
     private Instant factoryStart;
 
     @BeforeEach
     void setUp() throws IOException {
         factoryStart = Instant.parse("2026-05-22T08:00:00Z");
-        store = ScheduleStore.empty(factoryStart);
-        seedPartCatalog(store);
-        ScheduleRepository repository = new JsonScheduleRepository(tempDir.resolve("schedule.json"));
-        service = new SchedulerService(store, repository, new FixedTimeProvider(factoryStart));
+        repository = new JsonScheduleRepository(tempDir.resolve("schedule.json"));
+        ScheduleStore initial = ScheduleStore.empty(factoryStart);
+        seedPartCatalog(initial);
+        repository.writeState(initial);
+        service = new SchedulerService(repository, new FixedTimeProvider(factoryStart));
+    }
+
+    private void replaceState(ScheduleStore store) throws IOException {
+        repository.writeState(store);
     }
 
     private static void seedPartCatalog(ScheduleStore store) {
@@ -93,12 +97,14 @@ class GreedySchedulerTest {
 
     @Test
     void addOrder_machineBusyUntilLate_startsAfterAvailability() throws IOException {
-        store.setPartDefinition(
+        ScheduleStore state = repository.loadState();
+        state.setPartDefinition(
                 "P-tail",
                 new PartDefinition(10, List.of(new Task("T1", 0, Duration.ofMinutes(70), Capability.MILLING))));
         Instant lateFriday =
                 ZonedDateTime.of(2026, 5, 22, 19, 30, 0, 0, FactoryZone.ZONE).toInstant();
-        store.findMachine("ФРЕЗ-ЧПУ-01").setAvailableAt(lateFriday);
+        state.findMachine("ФРЕЗ-ЧПУ-01").setAvailableAt(lateFriday);
+        replaceState(state);
 
         AddOrderResult result = service.addOrder(new OrderRequest("O1", List.of(line("P-tail"))));
 
@@ -112,11 +118,13 @@ class GreedySchedulerTest {
 
     @Test
     void addOrder_withoutOrderId_assignsNextNumber() throws IOException {
-        store.addOrder(new scheduler.model.order.Order(
+        ScheduleStore state = repository.loadState();
+        state.addOrder(new scheduler.model.order.Order(
                 "З-2026-0005",
                 factoryStart,
-                List.of(store.createPart("P1", 1)),
+                List.of(state.createPart("P1", 1)),
                 1));
+        replaceState(state);
         AddOrderResult result = service.addOrder(new OrderRequest(null, List.of(line("P1"))));
 
         assertEquals("З-2026-0006", result.orderId());
@@ -289,10 +297,10 @@ class GreedySchedulerTest {
 
     @Test
     void scheduleView_containsSlackForFasterPartOnParallelMachine() throws IOException {
-        service.addOrder(new OrderRequest("O1", List.of(line("P-slow"), line("P-fast"))));
+        AddOrderResult result = service.addOrder(new OrderRequest("O1", List.of(line("P-slow"), line("P-fast"))));
 
-        Instant orderReady = OrderProgress.readyAt("O1", store.assignments());
-        Instant partFastReady = OrderProgress.partReadyAt("O1", "P-fast", store.assignments());
+        Instant orderReady = OrderProgress.readyAt("O1", result.assignmentsForOrder());
+        Instant partFastReady = OrderProgress.partReadyAt("O1", "P-fast", result.assignmentsForOrder());
 
         assertEquals(Duration.ofMinutes(60), Duration.between(partFastReady, orderReady));
         assertTrue(partFastReady.isBefore(orderReady));

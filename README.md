@@ -27,10 +27,28 @@ mvn spring-boot:run -Dspring-boot.run.profiles=docker
 ### 2. Приложение
 
 ```bash
+cp .env.example .env   # при необходимости
 mvn spring-boot:run
 ```
 
-Порт **8080**. При старте Liquibase создаёт схему и демо-каталог (станки, справочник деталей, пустые заказы).
+По умолчанию схема **`testing`** (демо-каталог при старте). Production — через env:
+
+```bash
+export APP_DB_SCHEMA=production
+export LIQUIBASE_CONTEXTS=
+mvn spring-boot:run
+```
+
+| Переменная | По умолчанию | Описание |
+|------------|--------------|----------|
+| `APP_DB_SCHEMA` | `testing` | PostgreSQL schema: `testing` или `production` |
+| `LIQUIBASE_CONTEXTS` | `demo` | Пусто на prod — без автосида |
+| `PG_HOST` / `PG_PORT` / `PG_DATABASE` | localhost / 5432 / ozbio | Подключение |
+| `SPRING_DATASOURCE_URL` | — | Полный JDBC URL (перекрывает host/port/schema) |
+
+Файл `.env` не коммитится — см. `.env.example`.
+
+Приложение читает состояние из PostgreSQL при каждом запросе (`GET /schedule`, `POST /orders`). Каталог (станки, детали) — только из БД (Liquibase). После планирования в БД сохраняются новый заказ, назначения и обновлённые доступности станков; каталог не перезаписывается.
 
 **Сброс демо** (очистить заказы, восстановить каталог):
 
@@ -45,7 +63,7 @@ mvn spring-boot:run
 
 ## Справочник деталей
 
-Таблицы `part_definition`, `part_task` (сиды в Liquibase `002-seed-demo-catalog.sql`).
+Таблицы `part_definition`, `part_task`. Демо-данные — `src/main/resources/db/seed/demo-catalog.sql` (не на prod).
 
 | partId | Приоритет | Технология (демо) |
 |--------|-----------|-------------------|
@@ -99,8 +117,21 @@ open 'http://localhost:8080/schedule?format=html'
 ## Liquibase
 
 - Master: `src/main/resources/db/changelog/db.changelog-master.yaml`
-- Схема: `changes/001-initial-schema.yaml`
-- Демо-данные: `changes/002-seed-demo-catalog.sql`
+- Схемы PG: `testing`, `production` (`000a-create-schemas.sql`)
+- DDL (в каждой схеме): `changes/001-initial-schema.sql`
+- Демо-каталог (только context `demo`, схема `testing`): `db/seed/demo-catalog.sql`
+
+| `APP_DB_SCHEMA` | `LIQUIBASE_CONTEXTS` | Каталог |
+|-----------------|----------------------|---------|
+| `testing` | `demo` (default) | автосид при старте |
+| `production` | пусто | только DDL; каталог — ETL / свой SQL |
+
+Ручная загрузка демо (только `testing`):
+
+```bash
+./scripts/seed-demo-catalog.sh
+./scripts/seed-demo-catalog.sh --docker
+```
 
 ## Тесты
 

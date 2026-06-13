@@ -3,68 +3,64 @@ package scheduler.service;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import scheduler.api.dto.OrderRequest;
-import scheduler.engine.policy.FactoryZone;
-import scheduler.engine.planning.GreedyScheduler;
-import scheduler.engine.policy.OrderIds;
-import scheduler.engine.policy.OrderPriorities;
+import scheduler.api.view.ScheduleView;
+import scheduler.api.view.ScheduleViewBuilder;
 import scheduler.engine.machine.MachineStateSync;
 import scheduler.engine.metrics.OrderProgress;
 import scheduler.engine.metrics.TaskReadiness;
-import scheduler.model.schedule.Assignment;
+import scheduler.engine.planning.GreedyScheduler;
+import scheduler.engine.policy.FactoryZone;
+import scheduler.engine.policy.OrderIds;
+import scheduler.engine.policy.OrderPriorities;
 import scheduler.model.order.Order;
 import scheduler.model.order.Part;
-import scheduler.model.schedule.SetupIntervals;
 import scheduler.model.order.Task;
+import scheduler.model.schedule.Assignment;
+import scheduler.model.schedule.SetupIntervals;
 import scheduler.store.ScheduleRepository;
 import scheduler.store.core.ScheduleStore;
 import scheduler.time.CurrentTimeProvider;
-import org.springframework.stereotype.Service;
 
 @Service
 public class SchedulerService {
-    private final ScheduleStore store;
     private final ScheduleRepository repository;
     private final CurrentTimeProvider time;
     private final GreedyScheduler scheduler;
 
-    public SchedulerService(
-            ScheduleStore store, ScheduleRepository repository, CurrentTimeProvider time) {
-        this.store = store;
+    public SchedulerService(ScheduleRepository repository, CurrentTimeProvider time) {
         this.repository = repository;
         this.time = time;
         this.scheduler = new GreedyScheduler(time);
-        MachineStateSync.sync(store, time.now());
-    }
-
-    public ScheduleStore store() {
-        return store;
     }
 
     public CurrentTimeProvider time() {
         return time;
     }
 
+    public ScheduleView buildScheduleView() throws IOException {
+        ScheduleStore store = loadSyncedState();
+        return ScheduleViewBuilder.build(store, time);
+    }
+
+    @Transactional
     public synchronized AddOrderResult addOrder(OrderRequest request) throws IOException {
+        ScheduleStore store = loadSyncedState();
         OrderValidator.validatePartIds(request, store);
         var parts = request.parts().stream()
                 .map(line -> store.createPart(line.partId(), line.resolvedQuantity()))
                 .toList();
         Instant createdAt = time.now();
-        String orderId = resolveOrderId(request.orderId(), createdAt);
+        String orderId = resolveOrderId(request.orderId(), createdAt, store);
         Order order = new Order(orderId, createdAt, parts, OrderPriorities.fromCreatedAt(createdAt));
         OrderValidator.validate(order, store);
 
-        ScheduleStore.SchedulingSnapshot snapshot = store.captureSchedulingState();
-        try {
-            store.addOrder(order);
-            scheduler.scheduleOrder(order, store);
-            verifyOrderFullyScheduled(order);
-            persist();
-        } catch (Exception e) {
-            store.rollbackTo(snapshot);
-            throw e;
-        }
+        store.addOrder(order);
+        scheduler.scheduleOrder(order, store);
+        verifyOrderFullyScheduled(order, store);
+        repository.persistOrderScheduling(store, order.orderId());
 
         List<Assignment> forOrder = store.assignments().stream()
                 .filter(a -> a.orderId().equals(order.orderId()))
@@ -73,7 +69,13 @@ public class SchedulerService {
                 order.orderId(), OrderProgress.readyAt(order.orderId(), forOrder), forOrder);
     }
 
-    private void verifyOrderFullyScheduled(Order order) {
+    private ScheduleStore loadSyncedState() throws IOException {
+        ScheduleStore store = repository.loadState();
+        MachineStateSync.sync(store, time.now());
+        return store;
+    }
+
+    private void verifyOrderFullyScheduled(Order order, ScheduleStore store) {
         for (Part part : order.parts()) {
             if (!TaskReadiness.isPartFullyScheduled(order.orderId(), part, store.assignments())) {
                 throw new SchedulingException(
@@ -99,16 +101,11 @@ public class SchedulerService {
         }
     }
 
-    private String resolveOrderId(String requestedId, Instant createdAt) {
+    private String resolveOrderId(String requestedId, Instant createdAt, ScheduleStore store) {
         if (requestedId != null && !requestedId.isBlank()) {
             return requestedId.trim();
         }
-        List<String> existing =
-                store.orders().stream().map(Order::orderId).toList();
+        List<String> existing = store.orders().stream().map(Order::orderId).toList();
         return OrderIds.nextOrderId(createdAt, FactoryZone.ZONE, existing);
-    }
-
-    private void persist() throws IOException {
-        repository.save(store);
     }
 }

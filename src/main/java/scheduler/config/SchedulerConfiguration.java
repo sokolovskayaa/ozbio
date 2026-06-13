@@ -6,7 +6,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 import scheduler.store.ScheduleRepository;
-import scheduler.store.core.ScheduleStore;
 import scheduler.time.CurrentTimeProvider;
 import scheduler.time.SystemCurrentTimeProvider;
 
@@ -14,23 +13,20 @@ import scheduler.time.SystemCurrentTimeProvider;
 public class SchedulerConfiguration {
 
     @Bean
-    ScheduleStore scheduleStore(ScheduleRepository repository) throws IOException {
-        return repository.loadOrCreate();
-    }
-
-    @Bean
     CurrentTimeProvider currentTimeProvider() {
         return new SystemCurrentTimeProvider();
     }
 
     @Bean
-    ApplicationRunner startupLog(ScheduleStore store, Environment env) {
+    ApplicationRunner startupLog(ScheduleRepository repository, Environment env) throws IOException {
         String port = env.getProperty("local.server.port", env.getProperty("server.port", "8080"));
         String datasource = env.getProperty("spring.datasource.url", "—");
+        String schema = env.getProperty("app.db.schema", "—");
         return args -> {
             System.out.println("Factory scheduler MVP — PostgreSQL");
+            System.out.println("Schema: " + schema);
             System.out.println("Datasource: " + datasource);
-            System.out.println("Factory started: " + store.factoryStartedAt());
+            System.out.println("Factory started: " + repository.factoryStartedAt());
             System.out.println("POST http://localhost:" + port + "/orders       — add order");
             System.out.println("GET  http://localhost:" + port + "/schedule       — JSON plan");
             System.out.println("GET  http://localhost:" + port + "/schedule?format=html — HTML in browser");

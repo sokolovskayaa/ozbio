@@ -45,3 +45,8 @@ data/schedule.json
 
 ### Generated demo HTML ###
 schedule-demo.html
+
+### Local environment (see .env.example) ###
+.env
+.env.*
+!.env.example

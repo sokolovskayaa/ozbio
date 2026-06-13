@@ -5,7 +5,7 @@ import java.util.List;
 import scheduler.model.machine.Capability;
 import scheduler.model.order.Task;
 
-/** Справочник деталей по умолчанию (демо-каталог). */
+/** Справочник деталей по умолчанию для JSON-репозитория (unit-тесты без PostgreSQL). */
 public final class CatalogSeeder {
     private CatalogSeeder() {}
 

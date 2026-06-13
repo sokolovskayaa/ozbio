@@ -1,6 +1,12 @@
 databaseChangeLog:
   - include:
-      file: changes/001-initial-schema.yaml
+      file: changes/000-sync-yaml-to-sql-changelog.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/000a-create-schemas.sql
+      relativeToChangelogFile: true
+  - include:
+      file: changes/001-initial-schema.sql
       relativeToChangelogFile: true
   - include:
       file: changes/002-seed-demo-catalog.yaml

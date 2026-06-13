@@ -2,8 +2,15 @@ databaseChangeLog:
   - changeSet:
       id: 002-seed-demo-catalog
       author: ozbio
+      context: demo
+      preConditions:
+        - onFail: MARK_RAN
+        - onError: MARK_RAN
+        - sqlCheck:
+            expectedResult: 0
+            sql: SELECT COUNT(*) FROM factory_state
       changes:
         - sqlFile:
-            path: 002-seed-demo-catalog.sql
+            path: ../../seed/demo-catalog.sql
             relativeToChangelogFile: true
             splitStatements: true

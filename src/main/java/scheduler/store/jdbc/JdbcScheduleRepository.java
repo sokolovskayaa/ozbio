@@ -18,7 +18,6 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import scheduler.model.machine.Capability;
 import scheduler.model.machine.Machine;
-import scheduler.model.machine.MachineGroup;
 import scheduler.model.machine.MachineStatus;
 import scheduler.model.order.Order;
 import scheduler.model.order.Part;
@@ -26,8 +25,6 @@ import scheduler.model.order.Task;
 import scheduler.model.schedule.Assignment;
 import scheduler.model.schedule.AssignmentStatus;
 import scheduler.store.ScheduleRepository;
-import scheduler.store.core.CatalogSeeder;
-import scheduler.store.core.DemoFactoryCatalog;
 import scheduler.store.core.ScheduleSnapshotMapper;
 import scheduler.store.core.ScheduleStore;
 import scheduler.store.json.ScheduleSnapshot;
@@ -45,16 +42,30 @@ public class JdbcScheduleRepository implements ScheduleRepository {
     }
 
     @Override
-    public ScheduleStore loadOrCreate() throws IOException {
-        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM factory_state", Integer.class);
-        if (count == null || count == 0) {
-            Instant now = Instant.now();
-            ScheduleStore store = ScheduleStore.empty(now);
-            CatalogSeeder.seedPartDefinitions(store);
-            save(store);
-            return store;
+    public ScheduleStore loadState() throws IOException {
+        if (factoryStateEmpty()) {
+            throw new IllegalStateException(
+                    "Database is empty: factory_state has no rows. "
+                            + "Run migrations and seed catalog: profile demo, or ./scripts/seed-demo-catalog.sh");
         }
         return load();
+    }
+
+    @Override
+    public Instant factoryStartedAt() throws IOException {
+        if (factoryStateEmpty()) {
+            throw new IllegalStateException(
+                    "Database is empty: factory_state has no rows. "
+                            + "Run migrations and seed catalog: profile demo, or ./scripts/seed-demo-catalog.sh");
+        }
+        return jdbc.queryForObject(
+                "SELECT factory_started_at FROM factory_state WHERE id = 1",
+                (rs, rowNum) -> readInstant(rs, "factory_started_at"));
+    }
+
+    private boolean factoryStateEmpty() {
+        Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM factory_state", Integer.class);
+        return count == null || count == 0;
     }
 
     private ScheduleStore load() {
@@ -193,97 +204,38 @@ public class JdbcScheduleRepository implements ScheduleRepository {
 
     @Override
     @Transactional
-    public void save(ScheduleStore store) throws IOException {
-        ScheduleSnapshot snapshot = store.toSnapshot();
+    public void persistOrderScheduling(ScheduleStore store, String orderId) throws IOException {
+        Order order = store.findOrder(orderId)
+                .orElseThrow(() -> new IllegalStateException("Order not found in working state: " + orderId));
         try {
-            int updated = jdbc.update(
-                    "UPDATE factory_state SET factory_started_at = ? WHERE id = 1",
-                    snapshot.factoryStartedAt);
-            if (updated == 0) {
+            jdbc.update(
+                    "INSERT INTO schedule_order (order_id, created_at, priority) VALUES (?, ?, ?)",
+                    order.orderId(),
+                    order.createdAt(),
+                    order.priority());
+            for (Part part : order.parts()) {
                 jdbc.update(
-                        "INSERT INTO factory_state (id, factory_started_at) VALUES (1, ?)",
-                        snapshot.factoryStartedAt);
-            }
-
-            jdbc.update("DELETE FROM assignment");
-            jdbc.update("DELETE FROM order_part_task");
-            jdbc.update("DELETE FROM order_part");
-            jdbc.update("DELETE FROM schedule_order");
-            jdbc.update("DELETE FROM part_task");
-            jdbc.update("DELETE FROM part_definition");
-            jdbc.update("DELETE FROM machine_capability");
-            jdbc.update("DELETE FROM machine");
-            jdbc.update("DELETE FROM machine_group");
-
-            for (MachineGroupSnapshot group : snapshot.machineGroups) {
-                MachineGroup g = group.toGroup();
-                jdbc.update(
-                        "INSERT INTO machine_group (group_id, name, setup_minutes) VALUES (?, ?, ?)",
-                        g.groupId(),
-                        g.name(),
-                        (int) g.setupDuration().toMinutes());
-            }
-
-            for (MachineSnapshot machine : snapshot.machines) {
-                Machine m = machine.toMachine(DemoFactoryCatalog.defaultGroupForMachine(machine.machineId()));
-                jdbc.update(
-                        "INSERT INTO machine (machine_id, group_id, available_at, status) VALUES (?, ?, ?, ?)",
-                        m.machineId(),
-                        m.groupId(),
-                        m.availableAt(),
-                        m.status().name());
-                for (Capability capability : m.capabilities()) {
+                        "INSERT INTO order_part (order_id, part_id, quantity) VALUES (?, ?, ?)",
+                        order.orderId(),
+                        part.partId(),
+                        part.quantity());
+                for (Task task : part.tasks()) {
                     jdbc.update(
-                            "INSERT INTO machine_capability (machine_id, capability) VALUES (?, ?)",
-                            m.machineId(),
-                            capability.name());
-                }
-            }
-
-            snapshot.partDefinitions.forEach((partId, def) -> {
-                jdbc.update(
-                        "INSERT INTO part_definition (part_id, priority) VALUES (?, ?)",
-                        partId,
-                        def.priority);
-                for (Task task : def.tasks) {
-                    jdbc.update(
-                            "INSERT INTO part_task (part_id, task_id, sequence, duration_seconds, required_capability) "
-                                    + "VALUES (?, ?, ?, ?, ?)",
-                            partId,
+                            "INSERT INTO order_part_task (order_id, part_id, task_id, sequence, duration_seconds, required_capability) "
+                                    + "VALUES (?, ?, ?, ?, ?, ?)",
+                            order.orderId(),
+                            part.partId(),
                             task.taskId(),
                             task.sequence(),
                             task.duration().getSeconds(),
                             task.requiredCapability().name());
                 }
-            });
-
-            for (Order order : snapshot.orders) {
-                jdbc.update(
-                        "INSERT INTO schedule_order (order_id, created_at, priority) VALUES (?, ?, ?)",
-                        order.orderId(),
-                        order.createdAt(),
-                        order.priority());
-                for (Part part : order.parts()) {
-                    jdbc.update(
-                            "INSERT INTO order_part (order_id, part_id, quantity) VALUES (?, ?, ?)",
-                            order.orderId(),
-                            part.partId(),
-                            part.quantity());
-                    for (Task task : part.tasks()) {
-                        jdbc.update(
-                                "INSERT INTO order_part_task (order_id, part_id, task_id, sequence, duration_seconds, required_capability) "
-                                        + "VALUES (?, ?, ?, ?, ?, ?)",
-                                order.orderId(),
-                                part.partId(),
-                                task.taskId(),
-                                task.sequence(),
-                                task.duration().getSeconds(),
-                                task.requiredCapability().name());
-                    }
-                }
             }
 
-            for (Assignment assignment : snapshot.assignments) {
+            for (Assignment assignment : store.assignments()) {
+                if (!assignment.orderId().equals(orderId)) {
+                    continue;
+                }
                 jdbc.update(
                         """
                         INSERT INTO assignment (
@@ -304,8 +256,16 @@ public class JdbcScheduleRepository implements ScheduleRepository {
                         assignment.actualStart(),
                         assignment.actualEnd());
             }
+
+            for (Machine machine : store.machines()) {
+                jdbc.update(
+                        "UPDATE machine SET available_at = ?, status = ? WHERE machine_id = ?",
+                        machine.availableAt(),
+                        machine.status().name(),
+                        machine.machineId());
+            }
         } catch (RuntimeException e) {
-            throw new IOException("Failed to save schedule to database", e);
+            throw new IOException("Failed to persist order scheduling to database", e);
         }
     }
 }

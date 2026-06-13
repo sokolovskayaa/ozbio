@@ -13,11 +13,8 @@ import org.springframework.web.bind.annotation.RestController;
 import scheduler.api.dto.OrderRequest;
 import scheduler.api.view.SchedulePageRenderer;
 import scheduler.api.view.ScheduleView;
-import scheduler.api.view.ScheduleViewBuilder;
-import scheduler.engine.machine.MachineStateSync;
 import scheduler.service.AddOrderResult;
 import scheduler.service.SchedulerService;
-import scheduler.store.core.ScheduleStore;
 
 @RestController
 public class ScheduleController {
@@ -35,7 +32,7 @@ public class ScheduleController {
             @RequestParam(name = "format", required = false) String format,
             @RequestHeader(value = HttpHeaders.ACCEPT, required = false) String accept)
             throws IOException {
-        ScheduleView view = buildScheduleView();
+        ScheduleView view = schedulerService.buildScheduleView();
         if (wantsHtml(format, accept)) {
             return ResponseEntity.ok()
                     .contentType(MediaType.TEXT_HTML)
@@ -47,7 +44,7 @@ public class ScheduleController {
     @GetMapping(path = "/schedule.html", produces = MediaType.TEXT_HTML_VALUE)
     public ResponseEntity<String> scheduleHtml(
             @RequestParam(name = "download", defaultValue = "true") boolean download) throws IOException {
-        ScheduleView view = buildScheduleView();
+        ScheduleView view = schedulerService.buildScheduleView();
         ResponseEntity.BodyBuilder builder = ResponseEntity.ok().contentType(MediaType.TEXT_HTML);
         if (download) {
             builder.header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"schedule.html\"");
@@ -58,12 +55,6 @@ public class ScheduleController {
     @PostMapping(path = "/orders", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public AddOrderResult addOrder(@RequestBody OrderRequest request) throws IOException {
         return schedulerService.addOrder(request);
-    }
-
-    private ScheduleView buildScheduleView() {
-        ScheduleStore store = schedulerService.store();
-        MachineStateSync.sync(store, schedulerService.time().now());
-        return ScheduleViewBuilder.build(store, schedulerService.time());
     }
 
     private static boolean wantsHtml(String format, String accept) {
