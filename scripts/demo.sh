@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
-# Демонстрация для директора. Требуется запущенный сервер: mvn -q exec:java
+# Демонстрация MVP: заказы + HTML. Сервер: mvn spring-boot:run
 set -euo pipefail
 
 BASE="${DEMO_URL:-http://localhost:8080}"
 JQ="${JQ:-jq}"
-# 8 шт. в демо вместо 50 — проще читать расписание (можно: DEMO_PART_QTY=10 ./scripts/demo.sh)
 DEMO_PART_QTY="${DEMO_PART_QTY:-8}"
 
 section() { echo ""; echo "=== $1 ==="; }
 
 require_server() {
   if ! curl -sf "$BASE/schedule" >/dev/null; then
-    echo "Сервер не отвечает на $BASE — запустите scheduler.Main и повторите." >&2
+    echo "Сервер не отвечает на $BASE — запустите mvn spring-boot:run и повторите." >&2
     exit 1
   fi
 }
 
-# POST/PUT + jq: при .error не падаем, выводим подсказку
 api_json() {
   local method="$1"
   local url="$2"
@@ -48,6 +46,10 @@ api_json() {
     echo "Подсказка: сбросьте демо — RESET_DEMO=1 $0 (остановите сервер, сброс, запуск сервера, снова $0)" >&2
   fi
   rm -f "$tmp"
+}
+
+http_ok() {
+  [[ "$1" == "200" || "$1" == "201" ]]
 }
 
 if [[ "${RESET_DEMO:-0}" == "1" ]]; then
@@ -104,7 +106,8 @@ ORDER_0142_BODY="$(jq -n --argjson qty "$DEMO_PART_QTY" '{
 }')"
 CODE_0142="$(curl -s -o "$RESP_0142" -w "%{http_code}" -X POST "$BASE/orders" \
   -H 'Content-Type: application/json; charset=utf-8' -d "$ORDER_0142_BODY")"
-if [[ "$CODE_0142" == "201" ]]; then
+READY_0142_BEFORE="$($JQ -r '.readyAt // empty' <"$RESP_0142")"
+if http_ok "$CODE_0142"; then
   $JQ '{
     orderId,
     readyAt,
@@ -113,6 +116,10 @@ if [[ "$CODE_0142" == "201" ]]; then
 elif $JQ -e '.error' <"$RESP_0142" >/dev/null 2>&1; then
   echo "POST: $($JQ -r .error <"$RESP_0142")"
   echo "Используется уже сохранённый план — проверяем GET /schedule…"
+  SCHEDULE_TMP="$(mktemp)"
+  curl -sf "$BASE/schedule" >"$SCHEDULE_TMP"
+  READY_0142_BEFORE="$($JQ -r --arg oid "З-2026-0142" '.orders[] | select(.orderId==$oid) | .readyAt' "$SCHEDULE_TMP")"
+  rm -f "$SCHEDULE_TMP"
 else
   echo "POST /orders HTTP $CODE_0142" >&2
   cat "$RESP_0142" >&2
@@ -122,10 +129,11 @@ fi
 rm -f "$RESP_0142"
 verify_demo_order_0142 || exit 1
 
-section "2. Текущее расписание (JSON, clock)"
+section "2. Текущее расписание (JSON)"
 api_json GET "$BASE/schedule" '' '
   {
     clock,
+    factoryStartedAt,
     machines: [(.machines // [])[] | {machineId, status, availableAt}],
     orders: [(.orders // [])[] | {
       orderId, readyAt,
@@ -134,63 +142,44 @@ api_json GET "$BASE/schedule" '' '
   }
 '
 
-section "3. Симуляция: прошло 2 часа (08:00 → 10:00)"
-api_json PUT "$BASE/time" '{"currentTime": "2026-05-22T10:00:00Z"}' .
+section "3. Заказ З-2026-0148: зажимная муфта (второй в очереди)"
+RESP_0148="$(mktemp)"
+CODE_0148="$(curl -s -o "$RESP_0148" -w "%{http_code}" -X POST "$BASE/orders" \
+  -H 'Content-Type: application/json; charset=utf-8' \
+  -d '{"orderId":"З-2026-0148","parts":[{"partId":"муфта-зажимная","quantity":1}]}')"
+if http_ok "$CODE_0148"; then
+  $JQ '{orderId, readyAt}' <"$RESP_0148"
+else
+  echo "POST /orders HTTP $CODE_0148" >&2
+  cat "$RESP_0148" >&2
+  rm -f "$RESP_0148"
+  exit 1
+fi
+rm -f "$RESP_0148"
 
-section "3a. Контекст закрытия смены (текущая смена, агрегаты по станкам)"
-api_json GET "$BASE/shifts/context" '' '
-  {
-    stale,
-    pendingShiftCount,
-    activeShift: (if .activeShift then {
-      groupId: .activeShift.groupId,
-      groupName: .activeShift.groupName,
-      shiftStart: .activeShift.shiftStart,
-      shiftEnd: .activeShift.shiftEnd,
-      overdue: .activeShift.overdue,
-      rows: [.activeShift.machines[] | .machineId as $m | .operations[] | {
-        machineId: $m, taskId, plannedCount, defaultCompletedCount
-      }]
-    } else null end)
-  }
-'
+section "4. Проверка очереди: readyAt З-2026-0142 не ухудшился"
+SCHEDULE_TMP="$(mktemp)"
+curl -sf "$BASE/schedule" >"$SCHEDULE_TMP"
+READY_0142_AFTER="$($JQ -r --arg oid "З-2026-0142" '.orders[] | select(.orderId==$oid) | .readyAt' "$SCHEDULE_TMP")"
+ORDER_COUNT="$($JQ '(.orders // []) | length' "$SCHEDULE_TMP")"
+echo "Заказов: $ORDER_COUNT"
+echo "readyAt 0142 до второго заказа: ${READY_0142_BEFORE:-—}"
+echo "readyAt 0142 после:            ${READY_0142_AFTER:-—}"
+if [[ -n "$READY_0142_BEFORE" && -n "$READY_0142_AFTER" ]]; then
+  if [[ "$READY_0142_AFTER" > "$READY_0142_BEFORE" ]]; then
+    echo "ПРЕДУПРЕЖДЕНИЕ: readyAt первого заказа увеличился после второго." >&2
+    rm -f "$SCHEDULE_TMP"
+    exit 1
+  fi
+  echo "OK: первый заказ не отодвинут."
+fi
+rm -f "$SCHEDULE_TMP"
 
-section "4. Заказ З-2026-0148: зажимная муфта — планируется от 10:00"
-api_json POST "$BASE/orders" '{
-  "orderId": "З-2026-0148",
-  "parts": [{"partId": "муфта-зажимная", "quantity": 1}]
-}' '
-  if .error then .
-  else {orderId, readyAt, assignmentsForOrder: (.assignmentsForOrder // [])}
-  end
-'
-
-section "5. Симуляция: конец рабочего дня (10:00 → 18:00) — появятся незакрытые смены"
-api_json PUT "$BASE/time" '{"currentTime": "2026-05-22T18:00:00Z"}' .
-
-section "6. Контекст смены: незакрытые смены (пустые уже закрыты автоматически)"
-api_json GET "$BASE/shifts/context" '' '
-  {
-    stale,
-    pendingShiftCount,
-    activeShift: (if .activeShift then {
-      groupId: .activeShift.groupId,
-      groupName: .activeShift.groupName,
-      shiftStart: .activeShift.shiftStart,
-      shiftEnd: .activeShift.shiftEnd,
-      overdue: .activeShift.overdue,
-      rows: [.activeShift.machines[] | .machineId as $m | .operations[] | {
-        machineId: $m, taskId, plannedCount
-      }]
-    } else null end)
-  }
-'
-echo "Закройте смену вручную в HTML (раздел «Закрытие смены») или: POST /shifts/close с телом из activeShift."
-
-section "7. HTML-отчёт (форма закрытия смены подгружается из /shifts/context)"
+section "5. HTML-отчёт"
 OUT="${1:-schedule-demo.html}"
 curl -sf -o "$OUT" "$BASE/schedule.html?download=false"
-echo "Сохранено: $OUT (откройте в браузере; нужен запущенный сервер для формы смены)"
-echo "Или в браузере: $BASE/schedule?format=html"
+echo "Сохранено: $OUT"
+echo "В браузере: $BASE/schedule?format=html"
+echo "Сценарий встречи: docs/согласование-с-директором.md"
 
 section "Готово"

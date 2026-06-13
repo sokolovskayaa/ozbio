@@ -2,12 +2,12 @@ package scheduler.service;
 
 import java.util.HashSet;
 import java.util.Set;
-import scheduler.api.OrderPartRequest;
-import scheduler.api.OrderRequest;
-import scheduler.model.Machine;
-import scheduler.model.Order;
-import scheduler.model.Task;
-import scheduler.store.ScheduleStore;
+import scheduler.api.dto.OrderPartRequest;
+import scheduler.api.dto.OrderRequest;
+import scheduler.model.machine.Machine;
+import scheduler.model.order.Order;
+import scheduler.model.order.Task;
+import scheduler.store.core.ScheduleStore;
 
 public final class OrderValidator {
     private OrderValidator() {}

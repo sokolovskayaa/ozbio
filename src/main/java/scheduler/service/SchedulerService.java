@@ -3,22 +3,25 @@ package scheduler.service;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
-import scheduler.api.OrderRequest;
-import scheduler.engine.FactoryZone;
-import scheduler.engine.GreedyScheduler;
-import scheduler.engine.OrderIds;
-import scheduler.engine.OrderPriorities;
-import scheduler.engine.MachineStateSync;
-import scheduler.engine.ScheduleMetrics;
-import scheduler.model.Assignment;
-import scheduler.model.Order;
-import scheduler.model.Part;
-import scheduler.model.SetupIntervals;
-import scheduler.model.Task;
-import scheduler.store.JsonScheduleRepository;
-import scheduler.store.ScheduleStore;
+import scheduler.api.dto.OrderRequest;
+import scheduler.engine.policy.FactoryZone;
+import scheduler.engine.planning.GreedyScheduler;
+import scheduler.engine.policy.OrderIds;
+import scheduler.engine.policy.OrderPriorities;
+import scheduler.engine.machine.MachineStateSync;
+import scheduler.engine.metrics.OrderProgress;
+import scheduler.engine.metrics.TaskReadiness;
+import scheduler.model.schedule.Assignment;
+import scheduler.model.order.Order;
+import scheduler.model.order.Part;
+import scheduler.model.schedule.SetupIntervals;
+import scheduler.model.order.Task;
+import scheduler.store.json.JsonScheduleRepository;
+import scheduler.store.core.ScheduleStore;
 import scheduler.time.CurrentTimeProvider;
+import org.springframework.stereotype.Service;
 
+@Service
 public class SchedulerService {
     private final ScheduleStore store;
     private final JsonScheduleRepository repository;
@@ -67,12 +70,12 @@ public class SchedulerService {
                 .filter(a -> a.orderId().equals(order.orderId()))
                 .toList();
         return new AddOrderResult(
-                order.orderId(), ScheduleMetrics.readyAt(order.orderId(), forOrder), forOrder);
+                order.orderId(), OrderProgress.readyAt(order.orderId(), forOrder), forOrder);
     }
 
     private void verifyOrderFullyScheduled(Order order) {
         for (Part part : order.parts()) {
-            if (!ScheduleMetrics.isPartFullyScheduled(order.orderId(), part, store.assignments())) {
+            if (!TaskReadiness.isPartFullyScheduled(order.orderId(), part, store.assignments())) {
                 throw new SchedulingException(
                         "Incomplete schedule for part " + part.partId() + " in order " + order.orderId());
             }
@@ -80,7 +83,7 @@ public class SchedulerService {
                 if (SetupIntervals.isSetup(task.taskId())) {
                     continue;
                 }
-                int scheduled = ScheduleMetrics.unitsScheduledForTask(
+                int scheduled = TaskReadiness.unitsScheduledForTask(
                         order.orderId(), part.partId(), task.taskId(), store.assignments());
                 if (scheduled < part.quantity()) {
                     throw new SchedulingException(

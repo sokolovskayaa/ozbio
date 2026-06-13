@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Расписание — завод бурового оборудования</title>
+    <link rel="stylesheet" href="/css/schedule.css">
+</head>
+<body>
+<header>
+    <h1>Завод бурового оборудования</h1>
+    <p class="meta">План производства · сформировано <span th:text="${page.generatedAt}"></span></p>
+    <div class="cards">
+        <div class="card"><span>Запуск завода</span><strong th:text="${page.factoryStartedAt}"></strong></div>
+        <div class="card">
+            <span>Сейчас</span>
+            <strong>
+                <span th:text="${page.currentTime}"></span>
+                <span th:if="${page.simulationEnabled}" class="tag">симуляция</span>
+            </strong>
+        </div>
+        <div class="card"><span>Заказов в очереди</span><strong th:text="${page.orderCount}"></strong></div>
+        <div class="card"><span>Станков</span><strong th:text="${page.machineCount}"></strong></div>
+    </div>
+    <div class="header-actions">
+        <a href="#controls" class="btn-primary btn-add-order-jump">+ Добавить заказ</a>
+    </div>
+    <div th:utext="${page.pageNav}"></div>
+    <div th:utext="${page.factoryOverview}"></div>
+</header>
+
+<div th:utext="${page.controlsPanel}"></div>
+<div th:utext="${page.ordersSection}"></div>
+<div th:utext="${page.machinesSection}"></div>
+<div th:utext="${page.machineGroupsSection}"></div>
+<div th:utext="${page.machineScheduleSection}"></div>
+<div th:utext="${page.catalogSection}"></div>
+
+<script id="order-parts-json" type="application/json" th:utext="${page.orderPartsJson}"></script>
+<script id="part-titles-json" type="application/json" th:utext="${page.partTitlesJson}"></script>
+<script id="schedule-meta-json" type="application/json" th:utext="${page.scheduleMetaJson}"></script>
+<script id="part-catalog-json" type="application/json" th:utext="${page.partCatalogJson}"></script>
+<script src="/js/schedule-actions.js"></script>
+<script src="/js/schedule-filters.js"></script>
+</body>
+</html>

@@ -2,8 +2,8 @@
 
 | Файл | Назначение |
 |------|------------|
-| `schedule.json.example` | Шаблон для сброса (`./scripts/reset-demo-data.sh`): справочник, станки, пустые заказы |
-| `schedule.json` | Рабочий файл (в `.gitignore`), перезаписывается при `addOrder` и смене времени |
+| `schedule.json.example` | Шаблон сброса (`./scripts/reset-demo-data.sh`): справочник, 6 станков, пустые заказы |
+| `schedule.json` | Рабочий файл (в `.gitignore`), перезаписывается при `POST /orders` |
 
 ## POST `/orders` (тело запроса)
 
@@ -16,16 +16,15 @@
 }
 ```
 
-`orderId` можно указать вручную (как в `./scripts/demo.sh`); иначе присвоится автоматически.
+`orderId` можно указать вручную; иначе присвоится `З-ГГГГ-NNNN`.
 
 ## После планирования в `schedule.json`
 
-- В `orders[].parts[]` — поле **`quantity`** и копия **`tasks`** из справочника.
-- В `assignments[]` — поле **`unitIndex`** (номер штуки, с 0).
+- В `orders[].parts[]` — **`quantity`** и копия **`tasks`** из справочника.
+- В `assignments[]` — **`unitIndex`** (номер штуки, с 0).
 
-Подробнее — раздел «Сохранение» в [README.md](../README.md).
+## Группы станков
 
-## Закрытие смены
+В example только `groupId`, `name`, `setupMinutes` — **без** `workWindows`. Планирование круглосуточное.
 
-- `lastClosedShiftEndByGroup` — конец последней закрытой смены по каждой группе станков (пустой объект после сброса демо).
-- Сценарий `./scripts/demo.sh`: сдвиг времени до 18:00 → `GET /shifts/context` → `POST /shifts/close` с `machineTaskCounts`.
+Подробнее — [README.md](../README.md) и [docs/правила-планировщика.md](../docs/правила-планировщика.md).
