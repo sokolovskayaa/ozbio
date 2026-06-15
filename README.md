@@ -1,137 +1,64 @@
-# ozbio — планировщик завода бурового оборудования (MVP)
+# ozbio
 
-Жадный планировщик с сохранением в **PostgreSQL** (Liquibase). Каждый `POST /orders` обновляет БД.
-
-Планирование **круглосуточно** (24/7). **Не в MVP:** смены, закрытие смены, overlap пакетов, симуляция времени, API статуса станка.
+Каркас Spring Boot API с Swagger UI и PostgreSQL (Liquibase).
 
 ## Запуск
 
-### 1. PostgreSQL
+### PostgreSQL
 
-**Вариант A — локальный PostgreSQL (порт 5432):**
+**Локальный Postgres (5432):**
 
 ```bash
 ./scripts/setup-local-postgres.sh
-mvn spring-boot:run
 ```
 
-Если ошибка `role "ozbio" does not exist` — сначала выполните `setup-local-postgres.sh`.
-
-**Вариант B — Docker (порт 5433 на хосте):**
+**Docker (5433 на хосте):**
 
 ```bash
 docker compose up -d
 mvn spring-boot:run -Dspring-boot.run.profiles=docker
 ```
 
-### 2. Приложение
+### Приложение
 
 ```bash
-cp .env.example .env   # при необходимости
+cp .env.example .env   # опционально, export вручную
 mvn spring-boot:run
 ```
 
-По умолчанию схема **`testing`** (демо-каталог при старте). Production — через env:
+При старте Liquibase накатывает changelog из `src/main/resources/db/changelog/` (пока без changeset'ов).
 
-```bash
-export APP_DB_SCHEMA=production
-export LIQUIBASE_CONTEXTS=
-mvn spring-boot:run
-```
+Переменные: `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `APP_DB_SCHEMA`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` — см. [`.env.example`](.env.example).
 
-| Переменная | По умолчанию | Описание |
-|------------|--------------|----------|
-| `APP_DB_SCHEMA` | `testing` | PostgreSQL schema: `testing` или `production` |
-| `LIQUIBASE_CONTEXTS` | `demo` | Пусто на prod — без автосида |
-| `PG_HOST` / `PG_PORT` / `PG_DATABASE` | localhost / 5432 / ozbio | Подключение |
-| `SPRING_DATASOURCE_URL` | — | Полный JDBC URL (перекрывает host/port/schema) |
+## Swagger
 
-Файл `.env` не коммитится — см. `.env.example`.
-
-Приложение читает состояние из PostgreSQL при каждом запросе (`GET /schedule`, `POST /orders`). Каталог (станки, детали) — только из БД (Liquibase). После планирования в БД сохраняются новый заказ, назначения и обновлённые доступности станков; каталог не перезаписывается.
-
-**Сброс демо** (очистить заказы, восстановить каталог):
-
-```bash
-./scripts/reset-demo-db.sh
-# перезапустите приложение
-```
-
-Файл `data/schedule.json.example` — эталон для тестов и экспорта; приложение читает **БД**.
-
-Предупреждения `System::load` / `enable-native-access` на Java 22+ — не ошибка; в `pom.xml` уже добавлен `--enable-native-access=ALL-UNNAMED` для `spring-boot:run`.
-
-## Справочник деталей
-
-Таблицы `part_definition`, `part_task`. Демо-данные — `src/main/resources/db/seed/demo-catalog.sql` (не на prod).
-
-| partId | Приоритет | Технология (демо) |
-|--------|-----------|-------------------|
-| `корпус-бура` | 10 | фрезеровка → расточка → чистовая фрезеровка |
-| `вал-буровой` | 8 | черновая/чистовая токарка → шлифование |
-| `гидроблок` | 5 | фрезерование → сверление |
-| `муфта-зажимная` | 3 | токарка → сварка |
-| `ниппель-соединительный` | 4 | сборка |
-
-Станки: `ФРЕЗ-ЧПУ-01`, `ТОКАР-ЧПУ-02`, `РАСТОЧ-03`, `ШЛИФ-04`, `СВАРКА-05`, `СБОРКА-06`.
-
-### Заказ
-
-```json
-{
-  "orderId": "З-2026-0142",
-  "parts": [
-    {"partId": "вал-буровой", "quantity": 8},
-    {"partId": "корпус-бура", "quantity": 8}
-  ]
-}
-```
-
-- `orderId` опционально → автономер `З-ГГГГ-NNNN`.
-- `quantity` по умолчанию 1.
-- `createdAt` = системное время.
-
-Подробно: [docs/правила-планировщика.md](docs/правила-планировщика.md).
+| URL | Описание |
+|-----|----------|
+| http://localhost:8080/swagger-ui.html | Swagger UI |
+| http://localhost:8080/api-docs | OpenAPI JSON |
 
 ## API
 
 | Метод | URL | Описание |
-|--------|-----|----------|
-| POST | `/orders` | Добавить заказ |
-| GET | `/schedule` | JSON |
-| GET | `/schedule?format=html` | HTML в браузере |
-| GET | `/schedule.html` | HTML (скачивание) |
-
-## Демонстрация
-
-```bash
-docker compose up -d
-mvn spring-boot:run -Dspring-boot.run.profiles=docker
-./scripts/reset-demo-db.sh
-./scripts/prep-director-demo.sh
-open 'http://localhost:8080/schedule?format=html'
-```
-
-Сценарий встречи: [docs/согласование-с-директором.md](docs/согласование-с-директором.md).
+|-------|-----|----------|
+| POST | `/orders` | Создать заказ (stub) |
 
 ## Liquibase
 
-- Master: `src/main/resources/db/changelog/db.changelog-master.yaml`
-- Схемы PG: `testing`, `production` (`000a-create-schemas.sql`)
-- DDL (в каждой схеме): `changes/001-initial-schema.sql`
-- Демо-каталог (только context `demo`, схема `testing`): `db/seed/demo-catalog.sql`
+- Master: [`src/main/resources/db/changelog/db.changelog-master.yaml`](src/main/resources/db/changelog/db.changelog-master.yaml)
+- Таблицы: [`src/main/resources/db/changelog/tables/`](src/main/resources/db/changelog/tables/) — по одному файлу на сущность
 
-| `APP_DB_SCHEMA` | `LIQUIBASE_CONTEXTS` | Каталог |
-|-----------------|----------------------|---------|
-| `testing` | `demo` (default) | автосид при старте |
-| `production` | пусто | только DDL; каталог — ETL / свой SQL |
+### Схема (заказы)
 
-Ручная загрузка демо (только `testing`):
+| Таблица | Описание |
+|---------|----------|
+| `orders` | Заказ: `id`, `status` (enum), `created_at` |
+| `detail` | Справочник деталей: `id`, `name` |
+| `tool` | Справочник инструментов: `id`, `name`, `assemble_duration` |
+| `order_detail` | Строки заказа: `(order_id, detail_id)`, `count` |
+| `order_tool` | Инструменты заказа: `(order_id, tool_id)`, `count` |
 
-```bash
-./scripts/seed-demo-catalog.sh
-./scripts/seed-demo-catalog.sh --docker
-```
+`order_status`: `CREATED`, `PLANNED`, `COMPLETED`, `CANCELLED`
 
 ## Тесты
 
@@ -139,14 +66,4 @@ open 'http://localhost:8080/schedule?format=html'
 mvn test
 ```
 
-Unit-тесты используют `JsonScheduleRepository` (временный файл). Матрица: [docs/тестирование.md](docs/тестирование.md).
-
-## Структура (основное)
-
-```
-scheduler/
-  store/jdbc/JdbcScheduleRepository.java
-  store/ScheduleRepository.java
-  engine/planning/GreedyScheduler.java
-  api/http/ScheduleController.java
-```
+Unit-тесты без PostgreSQL (Liquibase и DataSource отключены в test profile).

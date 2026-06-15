@@ -1,78 +1,27 @@
 #!/usr/bin/env bash
 # Создаёт пользователя и БД ozbio в локальном PostgreSQL (порт 5432).
-# Суперпользователь: обычно ваш логин macOS (не postgres). Скрипт пробует автоматически.
 set -euo pipefail
 
-PSQL_SUPERUSER="${PSQL_SUPERUSER:-}"
-PSQL_HOST="${PSQL_HOST:-127.0.0.1}"
-PSQL_PORT="${PSQL_PORT:-5432}"
-PSQL_DATABASE="${PSQL_DATABASE:-postgres}"
+PGHOST="${PGHOST:-127.0.0.1}"
+PGPORT="${PGPORT:-5432}"
+PGUSER="${PGUSER:-$(whoami)}"
+DB_USER="${DB_USER:-ozbio}"
+DB_PASS="${DB_PASS:-ozbio}"
+DB_NAME="${DB_NAME:-ozbio}"
 
-if ! command -v psql >/dev/null 2>&1; then
-  echo "ОШИБКА: нужен psql (PostgreSQL client)" >&2
-  exit 1
-fi
+psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d postgres -v ON_ERROR_STOP=1 <<SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${DB_USER}') THEN
+    CREATE ROLE ${DB_USER} LOGIN PASSWORD '${DB_PASS}';
+  END IF;
+END
+\$\$;
 
-run_psql() {
-  psql -h "$PSQL_HOST" -p "$PSQL_PORT" -U "$PSQL_SUPERUSER" -d "$PSQL_DATABASE" -v ON_ERROR_STOP=1 "$@"
-}
+SELECT format('CREATE DATABASE %I OWNER %I', '${DB_NAME}', '${DB_USER}')
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${DB_NAME}') \\gexec
 
-detect_superuser() {
-  local candidate
-  for candidate in "$PSQL_SUPERUSER" postgres "$(whoami)"; do
-    if [[ -z "$candidate" ]]; then
-      continue
-    fi
-    if psql -h "$PSQL_HOST" -p "$PSQL_PORT" -U "$candidate" -d "$PSQL_DATABASE" -tc "SELECT 1" >/dev/null 2>&1; then
-      PSQL_SUPERUSER="$candidate"
-      return 0
-    fi
-  done
-  return 1
-}
-
-if ! detect_superuser; then
-  echo "ОШИБКА: не удалось подключиться к PostgreSQL на ${PSQL_HOST}:${PSQL_PORT}." >&2
-  echo "  Убедитесь, что сервер запущен." >&2
-  echo "  Пример: PSQL_SUPERUSER=$(whoami) $0" >&2
-  echo "  Или Docker: docker compose up -d && mvn spring-boot:run -Dspring-boot.run.profiles=docker" >&2
-  exit 1
-fi
-
-echo "Настройка PostgreSQL на ${PSQL_HOST}:${PSQL_PORT} (суперпользователь: $PSQL_SUPERUSER)"
-
-if ! run_psql -tc "SELECT 1 FROM pg_roles WHERE rolname = 'ozbio'" | grep -q 1; then
-  echo "Создаём пользователя ozbio..."
-  run_psql -c "CREATE USER ozbio WITH PASSWORD 'ozbio';"
-else
-  echo "Пользователь ozbio уже существует."
-  run_psql -c "ALTER USER ozbio WITH PASSWORD 'ozbio';"
-fi
-
-if ! run_psql -tc "SELECT 1 FROM pg_database WHERE datname = 'ozbio'" | grep -q 1; then
-  echo "Создаём базу ozbio..."
-  run_psql -c "CREATE DATABASE ozbio OWNER ozbio;"
-else
-  echo "База ozbio уже существует."
-fi
-
-run_psql -c "GRANT ALL PRIVILEGES ON DATABASE ozbio TO ozbio;"
-
-run_psql -d ozbio <<'SQL'
-CREATE SCHEMA IF NOT EXISTS testing;
-CREATE SCHEMA IF NOT EXISTS production;
-ALTER SCHEMA testing OWNER TO ozbio;
-ALTER SCHEMA production OWNER TO ozbio;
-GRANT ALL ON SCHEMA testing TO ozbio;
-GRANT ALL ON SCHEMA production TO ozbio;
-ALTER DEFAULT PRIVILEGES IN SCHEMA testing GRANT ALL ON TABLES TO ozbio;
-ALTER DEFAULT PRIVILEGES IN SCHEMA production GRANT ALL ON TABLES TO ozbio;
+GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};
 SQL
 
-echo ""
-echo "OK. Схемы: testing, production"
-echo "  cp .env.example .env"
-echo "  APP_DB_SCHEMA=testing  mvn spring-boot:run"
-echo "  APP_DB_SCHEMA=production LIQUIBASE_CONTEXTS=  mvn spring-boot:run"
-echo ""
-echo "URL: jdbc:postgresql://${PSQL_HOST}:${PSQL_PORT}/ozbio?currentSchema=testing  user=ozbio"
+echo "OK: PostgreSQL ${PGHOST}:${PGPORT}, database=${DB_NAME}, user=${DB_USER}"
