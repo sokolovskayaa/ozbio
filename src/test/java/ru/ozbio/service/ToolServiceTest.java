@@ -12,7 +12,6 @@ import ru.ozbio.api.dto.CreateToolRequest;
 import ru.ozbio.api.dto.ToolDetailRequest;
 import ru.ozbio.persistence.ToolRepository;
 import ru.ozbio.service.exception.InvalidReferenceException;
-import ru.ozbio.service.exception.ToolInUseException;
 import ru.ozbio.service.model.CreateToolCommand;
 import ru.ozbio.service.model.ToolDetailLine;
 import ru.ozbio.service.model.ToolSummary;
@@ -70,23 +69,9 @@ class ToolServiceTest {
     }
 
     @Test
-    void delete_removesToolAndSpecification() {
-        when(toolRepository.existsById(10L)).thenReturn(true);
-        when(toolRepository.isReferenced(10L)).thenReturn(false);
-        when(toolRepository.deleteById(10L)).thenReturn(true);
-
+    void delete_callsRepository() {
         toolService.delete(10L);
 
         verify(toolRepository).deleteById(10L);
-    }
-
-    @Test
-    void delete_rejectsReferencedTool() {
-        when(toolRepository.existsById(10L)).thenReturn(true);
-        when(toolRepository.isReferenced(10L)).thenReturn(true);
-
-        assertThatThrownBy(() -> toolService.delete(10L)).isInstanceOf(ToolInUseException.class);
-
-        verify(toolRepository, never()).deleteById(10L);
     }
 }

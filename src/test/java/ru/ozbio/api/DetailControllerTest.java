@@ -20,6 +20,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -63,13 +64,34 @@ class DetailControllerTest {
                                         {
                                           "name":"Valve body",
                                           "operations":[
-                                            {"step":1,"duration":"PT30M","machineTypeId":1}
+                                            {"duration":"PT30M","machineTypeId":1}
                                           ]
                                         }
                                         """))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.operations[0].step").value(1));
+    }
+
+    @Test
+    void listDetails_returnsDetails() throws Exception {
+        when(detailService.list())
+                .thenReturn(
+                        List.of(
+                                new DetailResponse(
+                                        1L,
+                                        "Valve body",
+                                        List.of(
+                                                new OperationResponse(
+                                                        10L,
+                                                        1,
+                                                        Duration.ofMinutes(30),
+                                                        Duration.ZERO,
+                                                        1L)))));
+
+        mockMvc.perform(get("/details"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].name").value("Valve body"));
     }
 
     @Test

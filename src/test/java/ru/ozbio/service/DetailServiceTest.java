@@ -5,13 +5,13 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import ru.ozbio.api.dto.CreateDetailRequest;
 import ru.ozbio.api.dto.OperationRequest;
 import ru.ozbio.persistence.DetailRepository;
-import ru.ozbio.service.exception.DetailInUseException;
 import ru.ozbio.service.exception.InvalidReferenceException;
 import ru.ozbio.service.model.CreateDetailCommand;
 import ru.ozbio.service.model.DetailSummary;
@@ -50,12 +50,37 @@ class DetailServiceTest {
                                 "Valve body",
                                 List.of(
                                         new OperationRequest(
-                                                1, Duration.ofMinutes(30), 1L, Duration.ZERO))));
+                                                Duration.ofMinutes(30), 1L, Duration.ZERO))));
 
         assertThat(response.id()).isEqualTo(10L);
         assertThat(response.name()).isEqualTo("Valve body");
         assertThat(response.operations()).hasSize(1);
         verify(detailRepository).insert(any(CreateDetailCommand.class));
+    }
+
+    @Test
+    void create_assignsOperationStepsFromRequestOrder() {
+        when(detailRepository.machineTypeExists(1L)).thenReturn(true);
+        when(detailRepository.insert(any(CreateDetailCommand.class)))
+                .thenReturn(new DetailSummary(10L, "Valve body"));
+        when(detailRepository.findOperationsByDetailId(10L)).thenReturn(List.of());
+
+        var request =
+                new CreateDetailRequest(
+                        "Valve body",
+                        List.of(
+                                new OperationRequest(Duration.ofMinutes(30), 1L, Duration.ZERO),
+                                new OperationRequest(Duration.ofMinutes(20), 1L, Duration.ZERO)));
+        detailService.create(request);
+
+        ArgumentCaptor<CreateDetailCommand> captor = ArgumentCaptor.forClass(CreateDetailCommand.class);
+        verify(detailRepository).insert(captor.capture());
+        assertThat(captor.getValue().operations())
+                .extracting(CreateDetailCommand.Operation::step)
+                .containsExactly(1, 2);
+        assertThat(request.toCommand().operations())
+                .extracting(CreateDetailCommand.Operation::step)
+                .containsExactly(1, 2);
     }
 
     @Test
@@ -69,7 +94,6 @@ class DetailServiceTest {
                                                 "Valve body",
                                                 List.of(
                                                         new OperationRequest(
-                                                                1,
                                                                 Duration.ofMinutes(30),
                                                                 99L,
                                                                 Duration.ZERO)))))
@@ -79,23 +103,9 @@ class DetailServiceTest {
     }
 
     @Test
-    void delete_removesDetailAndRoute() {
-        when(detailRepository.existsById(10L)).thenReturn(true);
-        when(detailRepository.isReferenced(10L)).thenReturn(false);
-        when(detailRepository.deleteById(10L)).thenReturn(true);
-
+    void delete_callsRepository() {
         detailService.delete(10L);
 
         verify(detailRepository).deleteById(10L);
-    }
-
-    @Test
-    void delete_rejectsReferencedDetail() {
-        when(detailRepository.existsById(10L)).thenReturn(true);
-        when(detailRepository.isReferenced(10L)).thenReturn(true);
-
-        assertThatThrownBy(() -> detailService.delete(10L)).isInstanceOf(DetailInUseException.class);
-
-        verify(detailRepository, never()).deleteById(10L);
     }
 }

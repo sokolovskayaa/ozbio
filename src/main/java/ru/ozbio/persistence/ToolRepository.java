@@ -1,10 +1,15 @@
 package ru.ozbio.persistence;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import ru.ozbio.persistence.jdbc.JdbcSupport;
 import ru.ozbio.service.model.CreateToolCommand;
 import ru.ozbio.service.model.ToolDetailLine;
 import ru.ozbio.service.model.ToolSummary;
@@ -34,6 +39,21 @@ public class ToolRepository {
             ORDER BY td.detail_id
             """;
 
+    private static final String SELECT_TOOL_DETAILS_BY_TOOL_IDS_PREFIX =
+            """
+            SELECT td.tool_id, td.detail_id, d.name, td.count
+            FROM tool_detail td
+            JOIN detail d ON d.id = td.detail_id
+            WHERE td.tool_id IN (
+            """;
+
+    private static final String SELECT_ALL_TOOLS =
+            """
+            SELECT id, name, EXTRACT(EPOCH FROM assemble_duration)::bigint AS assemble_duration_seconds
+            FROM tool
+            ORDER BY id
+            """;
+
     private final JdbcTemplate jdbc;
 
     public ToolRepository(JdbcTemplate jdbc) {
@@ -59,6 +79,16 @@ public class ToolRepository {
         return tool;
     }
 
+    public List<ToolSummary> findAll() {
+        return jdbc.query(
+                SELECT_ALL_TOOLS,
+                (rs, rowNum) ->
+                        new ToolSummary(
+                                rs.getLong("id"),
+                                rs.getString("name"),
+                                Duration.ofSeconds(rs.getLong("assemble_duration_seconds"))));
+    }
+
     public List<ToolDetailLine> findDetailsByToolId(long toolId) {
         return jdbc.query(
                 SELECT_TOOL_DETAILS,
@@ -68,23 +98,37 @@ public class ToolRepository {
                 toolId);
     }
 
-    public boolean existsById(long id) {
-        Boolean exists =
-                jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM tool WHERE id = ?)", Boolean.class, id);
-        return Boolean.TRUE.equals(exists);
+    public Map<Long, List<ToolDetailLine>> findDetailsByToolIds(Collection<Long> toolIds) {
+        if (toolIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> ids = List.copyOf(toolIds);
+        String sql =
+                SELECT_TOOL_DETAILS_BY_TOOL_IDS_PREFIX
+                        + JdbcSupport.placeholders(ids.size())
+                        + ") ORDER BY td.tool_id, td.detail_id";
+
+        Map<Long, List<ToolDetailLine>> result = new HashMap<>();
+        jdbc.query(
+                sql,
+                rs -> {
+                    long toolId = rs.getLong("tool_id");
+                    result.computeIfAbsent(toolId, ignored -> new ArrayList<>())
+                            .add(
+                                    new ToolDetailLine(
+                                            rs.getLong("detail_id"),
+                                            rs.getString("name"),
+                                            rs.getInt("count")));
+                },
+                ids.toArray());
+
+        return result;
     }
 
     public boolean detailExists(long detailId) {
         Boolean exists =
                 jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM detail WHERE id = ?)", Boolean.class, detailId);
         return Boolean.TRUE.equals(exists);
-    }
-
-    public boolean isReferenced(long toolId) {
-        Boolean inOrders =
-                jdbc.queryForObject(
-                        "SELECT EXISTS(SELECT 1 FROM order_tool WHERE tool_id = ?)", Boolean.class, toolId);
-        return Boolean.TRUE.equals(inOrders);
     }
 
     public boolean deleteById(long id) {

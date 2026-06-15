@@ -20,6 +20,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -64,6 +65,22 @@ class ToolControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.details[0].count").value(2));
+    }
+
+    @Test
+    void listTools_returnsTools() throws Exception {
+        when(toolService.list())
+                .thenReturn(
+                        List.of(
+                                new ToolResponse(
+                                        1L,
+                                        "Drill",
+                                        Duration.ofMinutes(45),
+                                        List.of(new ToolDetailResponse(1L, "Body", 2)))));
+
+        mockMvc.perform(get("/tools"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].name").value("Drill"));
     }
 
     @Test

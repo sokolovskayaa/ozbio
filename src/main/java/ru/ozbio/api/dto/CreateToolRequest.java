@@ -7,8 +7,19 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
+import ru.ozbio.service.model.CreateToolCommand;
 
 public record CreateToolRequest(
         @NotBlank String name,
         @NotNull Duration assembleDuration,
-        @NotEmpty @Valid List<ToolDetailRequest> details) {}
+        @NotEmpty @Valid List<ToolDetailRequest> details) {
+
+    public CreateToolCommand toCommand() {
+        return new CreateToolCommand(
+                name.trim(),
+                assembleDuration,
+                details.stream()
+                        .map(detail -> new CreateToolCommand.Detail(detail.detailId(), detail.count()))
+                        .toList());
+    }
+}

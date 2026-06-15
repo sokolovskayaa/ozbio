@@ -10,9 +10,6 @@ import ru.ozbio.api.dto.MachineResponse;
 import ru.ozbio.api.dto.MachineTypeResponse;
 import ru.ozbio.persistence.MachineRepository;
 import ru.ozbio.service.exception.InvalidReferenceException;
-import ru.ozbio.service.exception.MachineNotFoundException;
-import ru.ozbio.service.exception.MachineTypeInUseException;
-import ru.ozbio.service.exception.MachineTypeNotFoundException;
 import ru.ozbio.service.model.MachineTypeSummary;
 
 @Service
@@ -26,7 +23,7 @@ public class MachineService {
 
     @Transactional
     public MachineTypeResponse createType(CreateMachineTypeRequest request) {
-        MachineTypeSummary type = machineRepository.insertType(request.typeName().trim());
+        MachineTypeSummary type = machineRepository.insertType(request.toCommand().typeName());
         return toResponse(type);
     }
 
@@ -36,15 +33,7 @@ public class MachineService {
 
     @Transactional
     public void deleteType(long id) {
-        if (!machineRepository.machineTypeExists(id)) {
-            throw new MachineTypeNotFoundException(id);
-        }
-        if (machineRepository.machineTypeIsReferenced(id)) {
-            throw new MachineTypeInUseException(id);
-        }
-        if (!machineRepository.deleteTypeById(id)) {
-            throw new MachineTypeNotFoundException(id);
-        }
+        machineRepository.deleteTypeById(id);
     }
 
     @Transactional
@@ -52,11 +41,7 @@ public class MachineService {
         if (!machineRepository.machineTypeExists(request.machineTypeId())) {
             throw new InvalidReferenceException("machineTypeId", request.machineTypeId());
         }
-        long machineId = machineRepository.insertMachine(request.machineTypeId());
-        return machineRepository
-                .findMachineById(machineId)
-                .map(this::toResponse)
-                .orElseThrow(() -> new MachineNotFoundException(machineId));
+        return toResponse(machineRepository.insertMachine(request.machineTypeId()));
     }
 
     public List<MachineResponse> list() {
@@ -65,12 +50,7 @@ public class MachineService {
 
     @Transactional
     public void delete(long id) {
-        if (!machineRepository.machineExists(id)) {
-            throw new MachineNotFoundException(id);
-        }
-        if (!machineRepository.deleteMachineById(id)) {
-            throw new MachineNotFoundException(id);
-        }
+        machineRepository.deleteMachineById(id);
     }
 
     private MachineTypeResponse toResponse(MachineTypeSummary type) {

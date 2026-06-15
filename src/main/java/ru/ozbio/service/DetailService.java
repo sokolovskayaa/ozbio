@@ -1,8 +1,6 @@
 package ru.ozbio.service;
 
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -10,10 +8,7 @@ import ru.ozbio.api.dto.CreateDetailRequest;
 import ru.ozbio.api.dto.DetailResponse;
 import ru.ozbio.api.dto.OperationResponse;
 import ru.ozbio.persistence.DetailRepository;
-import ru.ozbio.service.exception.DetailInUseException;
-import ru.ozbio.service.exception.DetailNotFoundException;
 import ru.ozbio.service.exception.InvalidReferenceException;
-import ru.ozbio.service.model.CreateDetailCommand;
 import ru.ozbio.service.model.DetailSummary;
 import ru.ozbio.service.model.OperationLine;
 
@@ -30,42 +25,32 @@ public class DetailService {
     public DetailResponse create(CreateDetailRequest request) {
         validateOperations(request);
 
-        CreateDetailCommand command =
-                new CreateDetailCommand(
-                        request.name().trim(),
-                        request.operations().stream()
-                                .map(
-                                        operation ->
-                                                new CreateDetailCommand.Operation(
-                                                        operation.step(),
-                                                        operation.duration(),
-                                                        operation.setupDuration(),
-                                                        operation.machineTypeId()))
-                                .toList());
-
-        DetailSummary detail = detailRepository.insert(command);
+        DetailSummary detail = detailRepository.insert(request.toCommand());
         return toResponse(detail, detailRepository.findOperationsByDetailId(detail.id()));
+    }
+
+    public List<DetailResponse> list() {
+        List<DetailSummary> details = detailRepository.findAll();
+        var operationsByDetailId =
+                detailRepository.findOperationsByDetailIds(
+                        details.stream().map(DetailSummary::id).toList());
+
+        return details.stream()
+                .map(
+                        detail ->
+                                toResponse(
+                                        detail,
+                                        operationsByDetailId.getOrDefault(detail.id(), List.of())))
+                .toList();
     }
 
     @Transactional
     public void delete(long id) {
-        if (!detailRepository.existsById(id)) {
-            throw new DetailNotFoundException(id);
-        }
-        if (detailRepository.isReferenced(id)) {
-            throw new DetailInUseException(id);
-        }
-        if (!detailRepository.deleteById(id)) {
-            throw new DetailNotFoundException(id);
-        }
+        detailRepository.deleteById(id);
     }
 
     private void validateOperations(CreateDetailRequest request) {
-        Set<Integer> steps = new HashSet<>();
         for (var operation : request.operations()) {
-            if (!steps.add(operation.step())) {
-                throw new IllegalArgumentException("Duplicate operation step: " + operation.step());
-            }
             if (!detailRepository.machineTypeExists(operation.machineTypeId())) {
                 throw new InvalidReferenceException("machineTypeId", operation.machineTypeId());
             }

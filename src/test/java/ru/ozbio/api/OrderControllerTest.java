@@ -20,6 +20,7 @@ import ru.ozbio.service.OrderService;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -65,5 +66,23 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.id").value(1))
                 .andExpect(jsonPath("$.status").value("CREATED"))
                 .andExpect(jsonPath("$.details[0].count").value(2));
+    }
+
+    @Test
+    void listOrders_returnsOrders() throws Exception {
+        when(orderService.list())
+                .thenReturn(
+                        List.of(
+                                new OrderResponse(
+                                        1L,
+                                        OrderStatus.CREATED,
+                                        Instant.parse("2026-01-01T12:00:00Z"),
+                                        List.of(new OrderDetailResponse(1L, "Body", 2)),
+                                        List.of())));
+
+        mockMvc.perform(get("/orders"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(1))
+                .andExpect(jsonPath("$[0].status").value("CREATED"));
     }
 }

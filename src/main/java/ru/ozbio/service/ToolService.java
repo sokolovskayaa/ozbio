@@ -11,9 +11,6 @@ import ru.ozbio.api.dto.ToolDetailResponse;
 import ru.ozbio.api.dto.ToolResponse;
 import ru.ozbio.persistence.ToolRepository;
 import ru.ozbio.service.exception.InvalidReferenceException;
-import ru.ozbio.service.exception.ToolInUseException;
-import ru.ozbio.service.exception.ToolNotFoundException;
-import ru.ozbio.service.model.CreateToolCommand;
 import ru.ozbio.service.model.ToolDetailLine;
 import ru.ozbio.service.model.ToolSummary;
 
@@ -30,29 +27,27 @@ public class ToolService {
     public ToolResponse create(CreateToolRequest request) {
         validateDetails(request);
 
-        CreateToolCommand command =
-                new CreateToolCommand(
-                        request.name().trim(),
-                        request.assembleDuration(),
-                        request.details().stream()
-                                .map(detail -> new CreateToolCommand.Detail(detail.detailId(), detail.count()))
-                                .toList());
-
-        ToolSummary tool = toolRepository.insert(command);
+        ToolSummary tool = toolRepository.insert(request.toCommand());
         return toResponse(tool, toolRepository.findDetailsByToolId(tool.id()));
+    }
+
+    public List<ToolResponse> list() {
+        List<ToolSummary> tools = toolRepository.findAll();
+        var detailsByToolId =
+                toolRepository.findDetailsByToolIds(tools.stream().map(ToolSummary::id).toList());
+
+        return tools.stream()
+                .map(
+                        tool ->
+                                toResponse(
+                                        tool,
+                                        detailsByToolId.getOrDefault(tool.id(), List.of())))
+                .toList();
     }
 
     @Transactional
     public void delete(long id) {
-        if (!toolRepository.existsById(id)) {
-            throw new ToolNotFoundException(id);
-        }
-        if (toolRepository.isReferenced(id)) {
-            throw new ToolInUseException(id);
-        }
-        if (!toolRepository.deleteById(id)) {
-            throw new ToolNotFoundException(id);
-        }
+        toolRepository.deleteById(id);
     }
 
     private void validateDetails(CreateToolRequest request) {

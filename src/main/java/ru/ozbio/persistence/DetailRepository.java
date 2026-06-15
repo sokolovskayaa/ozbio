@@ -3,10 +3,15 @@ package ru.ozbio.persistence;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import ru.ozbio.persistence.jdbc.JdbcSupport;
 import ru.ozbio.service.model.CreateDetailCommand;
 import ru.ozbio.service.model.DetailSummary;
 import ru.ozbio.service.model.OperationLine;
@@ -40,6 +45,25 @@ public class DetailRepository {
             ORDER BY step
             """;
 
+    private static final String SELECT_OPERATIONS_BY_DETAIL_IDS_PREFIX =
+            """
+            SELECT detail_id,
+                   id,
+                   step,
+                   machine_type_id,
+                   EXTRACT(EPOCH FROM duration)::bigint AS duration_seconds,
+                   EXTRACT(EPOCH FROM setup_duration)::bigint AS setup_duration_seconds
+            FROM operation
+            WHERE detail_id IN (
+            """;
+
+    private static final String SELECT_ALL_DETAILS =
+            """
+            SELECT id, name
+            FROM detail
+            ORDER BY id
+            """;
+
     private final JdbcTemplate jdbc;
 
     public DetailRepository(JdbcTemplate jdbc) {
@@ -66,6 +90,12 @@ public class DetailRepository {
         return detail;
     }
 
+    public List<DetailSummary> findAll() {
+        return jdbc.query(
+                SELECT_ALL_DETAILS,
+                (rs, rowNum) -> new DetailSummary(rs.getLong("id"), rs.getString("name")));
+    }
+
     public List<OperationLine> findOperationsByDetailId(long detailId) {
         return jdbc.query(
                 SELECT_OPERATIONS,
@@ -73,23 +103,26 @@ public class DetailRepository {
                 detailId);
     }
 
-    public boolean existsById(long id) {
-        Boolean exists =
-                jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM detail WHERE id = ?)", Boolean.class, id);
-        return Boolean.TRUE.equals(exists);
-    }
-
-    public boolean isReferenced(long detailId) {
-        Boolean inOrders =
-                jdbc.queryForObject(
-                        "SELECT EXISTS(SELECT 1 FROM order_detail WHERE detail_id = ?)", Boolean.class, detailId);
-        if (Boolean.TRUE.equals(inOrders)) {
-            return true;
+    public Map<Long, List<OperationLine>> findOperationsByDetailIds(Collection<Long> detailIds) {
+        if (detailIds.isEmpty()) {
+            return Map.of();
         }
-        Boolean inTools =
-                jdbc.queryForObject(
-                        "SELECT EXISTS(SELECT 1 FROM tool_detail WHERE detail_id = ?)", Boolean.class, detailId);
-        return Boolean.TRUE.equals(inTools);
+        List<Long> ids = List.copyOf(detailIds);
+        String sql =
+                SELECT_OPERATIONS_BY_DETAIL_IDS_PREFIX
+                        + JdbcSupport.placeholders(ids.size())
+                        + ") ORDER BY detail_id, step";
+
+        Map<Long, List<OperationLine>> result = new HashMap<>();
+        jdbc.query(
+                sql,
+                rs -> {
+                    long detailId = rs.getLong("detail_id");
+                    result.computeIfAbsent(detailId, ignored -> new ArrayList<>()).add(mapOperation(rs));
+                },
+                ids.toArray());
+
+        return result;
     }
 
     public boolean machineTypeExists(long machineTypeId) {

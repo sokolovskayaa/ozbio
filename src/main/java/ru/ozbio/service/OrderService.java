@@ -12,7 +12,6 @@ import ru.ozbio.api.dto.OrderResponse;
 import ru.ozbio.api.dto.OrderToolResponse;
 import ru.ozbio.persistence.OrderRepository;
 import ru.ozbio.service.exception.InvalidReferenceException;
-import ru.ozbio.service.model.CreateOrderCommand;
 import ru.ozbio.service.model.OrderDetailLine;
 import ru.ozbio.service.model.OrderSummary;
 import ru.ozbio.service.model.OrderToolLine;
@@ -30,20 +29,28 @@ public class OrderService {
     public OrderResponse create(CreateOrderRequest request) {
         validateRequest(request);
 
-        CreateOrderCommand command =
-                new CreateOrderCommand(
-                        request.details().stream()
-                                .map(d -> new CreateOrderCommand.DetailLine(d.detailId(), d.count()))
-                                .toList(),
-                        request.tools().stream()
-                                .map(t -> new CreateOrderCommand.ToolLine(t.toolId(), t.count()))
-                                .toList());
-
-        OrderSummary order = orderRepository.insert(command);
+        OrderSummary order = orderRepository.insert(request.toCommand());
         return toResponse(
                 order,
                 orderRepository.findDetailsByOrderId(order.id()),
                 orderRepository.findToolsByOrderId(order.id()));
+    }
+
+    public List<OrderResponse> list() {
+        List<OrderSummary> orders = orderRepository.findAll();
+        var detailsByOrderId =
+                orderRepository.findDetailsByOrderIds(orders.stream().map(OrderSummary::id).toList());
+        var toolsByOrderId =
+                orderRepository.findToolsByOrderIds(orders.stream().map(OrderSummary::id).toList());
+
+        return orders.stream()
+                .map(
+                        order ->
+                                toResponse(
+                                        order,
+                                        detailsByOrderId.getOrDefault(order.id(), List.of()),
+                                        toolsByOrderId.getOrDefault(order.id(), List.of())))
+                .toList();
     }
 
     private void validateRequest(CreateOrderRequest request) {

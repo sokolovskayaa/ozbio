@@ -20,9 +20,14 @@ public class MachineRepository {
 
     private static final String INSERT_MACHINE =
             """
-            INSERT INTO machine (machine_type_id)
-            VALUES (?)
-            RETURNING id, machine_type_id
+            WITH inserted AS (
+                INSERT INTO machine (machine_type_id)
+                VALUES (?)
+                RETURNING id, machine_type_id
+            )
+            SELECT i.id, i.machine_type_id, mt.type_name
+            FROM inserted i
+            JOIN machine_type mt ON mt.id = i.machine_type_id
             """;
 
     private static final String SELECT_MACHINE =
@@ -61,8 +66,15 @@ public class MachineRepository {
                 typeName);
     }
 
-    public long insertMachine(long machineTypeId) {
-        return jdbc.queryForObject(INSERT_MACHINE, Long.class, machineTypeId);
+    public MachineSummary insertMachine(long machineTypeId) {
+        return jdbc.queryForObject(
+                INSERT_MACHINE,
+                (rs, rowNum) ->
+                        new MachineSummary(
+                                rs.getLong("id"),
+                                rs.getLong("machine_type_id"),
+                                rs.getString("type_name")),
+                machineTypeId);
     }
 
     public Optional<MachineSummary> findMachineById(long id) {
@@ -99,25 +111,6 @@ public class MachineRepository {
                 jdbc.queryForObject(
                         "SELECT EXISTS(SELECT 1 FROM machine_type WHERE id = ?)", Boolean.class, id);
         return Boolean.TRUE.equals(exists);
-    }
-
-    public boolean machineExists(long id) {
-        Boolean exists =
-                jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM machine WHERE id = ?)", Boolean.class, id);
-        return Boolean.TRUE.equals(exists);
-    }
-
-    public boolean machineTypeIsReferenced(long id) {
-        Boolean hasMachines =
-                jdbc.queryForObject(
-                        "SELECT EXISTS(SELECT 1 FROM machine WHERE machine_type_id = ?)", Boolean.class, id);
-        if (Boolean.TRUE.equals(hasMachines)) {
-            return true;
-        }
-        Boolean hasOperations =
-                jdbc.queryForObject(
-                        "SELECT EXISTS(SELECT 1 FROM operation WHERE machine_type_id = ?)", Boolean.class, id);
-        return Boolean.TRUE.equals(hasOperations);
     }
 
     public boolean deleteTypeById(long id) {

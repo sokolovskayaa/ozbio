@@ -1,7 +1,6 @@
 package ru.ozbio.service;
 
 import java.util.List;
-import java.util.Optional;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -12,8 +11,6 @@ import ru.ozbio.api.dto.CreateMachineRequest;
 import ru.ozbio.api.dto.CreateMachineTypeRequest;
 import ru.ozbio.persistence.MachineRepository;
 import ru.ozbio.service.exception.InvalidReferenceException;
-import ru.ozbio.service.exception.MachineNotFoundException;
-import ru.ozbio.service.exception.MachineTypeInUseException;
 import ru.ozbio.service.model.MachineSummary;
 import ru.ozbio.service.model.MachineTypeSummary;
 
@@ -59,23 +56,24 @@ class MachineServiceTest {
     }
 
     @Test
-    void deleteType_rejectsReferencedType() {
-        when(machineRepository.machineTypeExists(1L)).thenReturn(true);
-        when(machineRepository.machineTypeIsReferenced(1L)).thenReturn(true);
+    void deleteType_callsRepository() {
+        machineService.deleteType(1L);
 
-        assertThatThrownBy(() -> machineService.deleteType(1L)).isInstanceOf(MachineTypeInUseException.class);
+        verify(machineRepository).deleteTypeById(1L);
     }
 
     @Test
     void create_persistsMachine() {
         when(machineRepository.machineTypeExists(1L)).thenReturn(true);
-        when(machineRepository.insertMachine(1L)).thenReturn(10L);
-        when(machineRepository.findMachineById(10L))
-                .thenReturn(Optional.of(new MachineSummary(10L, 1L, "Lathe")));
+        when(machineRepository.insertMachine(1L))
+                .thenReturn(new MachineSummary(10L, 1L, "Lathe"));
 
         var response = machineService.create(new CreateMachineRequest(1L));
 
+        assertThat(response.id()).isEqualTo(10L);
         assertThat(response.machineTypeName()).isEqualTo("Lathe");
+        verify(machineRepository).insertMachine(1L);
+        verify(machineRepository, never()).findMachineById(10L);
     }
 
     @Test
@@ -89,19 +87,9 @@ class MachineServiceTest {
     }
 
     @Test
-    void delete_removesMachine() {
-        when(machineRepository.machineExists(10L)).thenReturn(true);
-        when(machineRepository.deleteMachineById(10L)).thenReturn(true);
-
+    void delete_callsRepository() {
         machineService.delete(10L);
 
         verify(machineRepository).deleteMachineById(10L);
-    }
-
-    @Test
-    void delete_throwsWhenMachineNotFound() {
-        when(machineRepository.machineExists(99L)).thenReturn(false);
-
-        assertThatThrownBy(() -> machineService.delete(99L)).isInstanceOf(MachineNotFoundException.class);
     }
 }
