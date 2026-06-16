@@ -57,6 +57,17 @@ public class DetailRepository {
             WHERE detail_id IN (
             """;
 
+    private static final String SELECT_OPERATIONS_BY_IDS_PREFIX =
+            """
+            SELECT id,
+                   step,
+                   machine_type_id,
+                   EXTRACT(EPOCH FROM duration)::bigint AS duration_seconds,
+                   EXTRACT(EPOCH FROM setup_duration)::bigint AS setup_duration_seconds
+            FROM operation
+            WHERE id IN (
+            """;
+
     private static final String SELECT_ALL_DETAILS =
             """
             SELECT id, name
@@ -119,6 +130,28 @@ public class DetailRepository {
                 rs -> {
                     long detailId = rs.getLong("detail_id");
                     result.computeIfAbsent(detailId, ignored -> new ArrayList<>()).add(mapOperation(rs));
+                },
+                ids.toArray());
+
+        return result;
+    }
+
+    public Map<Long, OperationLine> findOperationsByIds(Collection<Long> operationIds) {
+        if (operationIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> ids = List.copyOf(operationIds);
+        String sql =
+                SELECT_OPERATIONS_BY_IDS_PREFIX
+                        + JdbcSupport.placeholders(ids.size())
+                        + ")";
+
+        Map<Long, OperationLine> result = new HashMap<>();
+        jdbc.query(
+                sql,
+                rs -> {
+                    OperationLine operation = mapOperation(rs);
+                    result.put(operation.id(), operation);
                 },
                 ids.toArray());
 

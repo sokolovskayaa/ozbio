@@ -1,10 +1,15 @@
 package ru.ozbio.persistence;
 
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import ru.ozbio.persistence.jdbc.JdbcSupport;
 import ru.ozbio.service.model.MachineSummary;
 import ru.ozbio.service.model.MachineTypeSummary;
 
@@ -51,6 +56,14 @@ public class MachineRepository {
             SELECT id, type_name
             FROM machine_type
             ORDER BY id
+            """;
+
+    private static final String SELECT_MACHINES_BY_TYPE_IDS_PREFIX =
+            """
+            SELECT m.id, m.machine_type_id, mt.type_name
+            FROM machine m
+            JOIN machine_type mt ON mt.id = m.machine_type_id
+            WHERE m.machine_type_id IN (
             """;
 
     private final JdbcTemplate jdbc;
@@ -104,6 +117,34 @@ public class MachineRepository {
                                 rs.getLong("id"),
                                 rs.getLong("machine_type_id"),
                                 rs.getString("type_name")));
+    }
+
+    public Map<Long, List<MachineSummary>> findMachinesByMachineTypeIds(Collection<Long> machineTypeIds) {
+        if (machineTypeIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> ids = List.copyOf(machineTypeIds);
+        String sql =
+                SELECT_MACHINES_BY_TYPE_IDS_PREFIX
+                        + JdbcSupport.placeholders(ids.size())
+                        + ") ORDER BY m.machine_type_id, m.id";
+
+        Map<Long, List<MachineSummary>> result = new HashMap<>();
+        jdbc.query(
+                sql,
+                rs -> {
+                    long machineTypeId = rs.getLong("machine_type_id");
+                    result
+                            .computeIfAbsent(machineTypeId, ignored -> new ArrayList<>())
+                            .add(
+                                    new MachineSummary(
+                                            rs.getLong("id"),
+                                            machineTypeId,
+                                            rs.getString("type_name")));
+                },
+                ids.toArray());
+
+        return result;
     }
 
     public boolean machineTypeExists(long id) {

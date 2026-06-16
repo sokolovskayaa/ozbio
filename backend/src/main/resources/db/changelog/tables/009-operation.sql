@@ -18,4 +18,4 @@ COMMENT ON COLUMN operation.detail_id IS 'Деталь, для которой о
 COMMENT ON COLUMN operation.duration IS 'Длительность обработки одной единицы детали на операции';
 COMMENT ON COLUMN operation.machine_type_id IS 'Подходящий тип станка для выполнения операции';
 COMMENT ON COLUMN operation.step IS 'Порядковый номер шага в маршруте (1, 2, 3, …)';
-COMMENT ON COLUMN operation.setup_duration IS 'Длительность переналадки на одну единицу детали';
+COMMENT ON COLUMN operation.setup_duration IS 'Длительность переналадки станка для начала операции';

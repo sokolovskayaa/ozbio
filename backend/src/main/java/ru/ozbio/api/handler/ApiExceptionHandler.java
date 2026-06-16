@@ -10,6 +10,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import ru.ozbio.engine.exception.NoMachineAvailableException;
 import ru.ozbio.service.exception.InvalidReferenceException;
 
 @RestControllerAdvice
@@ -27,6 +28,15 @@ public class ApiExceptionHandler {
                 HttpStatus.BAD_REQUEST,
                 "Data integrity violation",
                 ex.getMostSpecificCause().getMessage());
+    }
+
+    @ExceptionHandler(NoMachineAvailableException.class)
+    ProblemDetail handleNoMachineAvailable(NoMachineAvailableException ex) {
+        ProblemDetail detail =
+                problemDetail(HttpStatus.CONFLICT, "No machine available", ex.getMessage());
+        detail.setProperty("machineTypeId", ex.machineTypeId());
+        detail.setProperty("operationId", ex.operationId());
+        return detail;
     }
 
     @ExceptionHandler(InvalidReferenceException.class)
