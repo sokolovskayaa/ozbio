@@ -9,6 +9,28 @@ services:
       POSTGRES_PASSWORD: ozbio
     volumes:
       - ozbio_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ozbio -d ozbio"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_DATABASE: ozbio
+      SPRING_DATASOURCE_USERNAME: ozbio
+      SPRING_DATASOURCE_PASSWORD: ozbio
+    depends_on:
+      postgres:
+        condition: service_healthy
 
 volumes:
   ozbio_pg_data:

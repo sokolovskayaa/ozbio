@@ -1,69 +1,78 @@
 # ozbio
 
-Каркас Spring Boot API с Swagger UI и PostgreSQL (Liquibase).
+Монорепозиторий: **backend** (Spring Boot API) + **frontend** (UI, позже).  
+Docker Compose в корне поднимает весь бэкенд одной командой.
 
-## Запуск
+## Структура
 
-### PostgreSQL
-
-**Локальный Postgres (5432):**
-
-```bash
-./scripts/setup-local-postgres.sh
+```
+ozbio/
+├── docker-compose.yml    # postgres + api
+├── README.md
+├── backend/              # Java API — см. backend/README.md
+└── frontend/             # UI (позже)
 ```
 
-**Docker (5433 на хосте):**
+## Запуск всего бэкенда (Docker)
+
+Требуется Docker. На macOS с Colima используйте **`docker-compose`** (с дефисом).
+
+Из **корня** репозитория:
 
 ```bash
-docker compose up -d
-mvn spring-boot:run -Dspring-boot.run.profiles=docker
+cd /path/to/ozbio
+docker-compose up -d --build
 ```
 
-### Приложение
+Поднимаются:
+- **postgres** — БД `ozbio`, на хосте порт **5433**
+- **api** — Spring Boot, порт **8080**
+
+Проверка:
+
+| Сервис | URL |
+|--------|-----|
+| API | http://localhost:8080 |
+| Swagger UI | http://localhost:8080/swagger-ui.html |
+| OpenAPI JSON | http://localhost:8080/api-docs |
+
+Логи API:
 
 ```bash
-cp .env.example .env   # опционально, export вручную
-mvn spring-boot:run
+docker-compose logs -f api
 ```
 
-При старте Liquibase накатывает changelog из `src/main/resources/db/changelog/` (пока без changeset'ов).
-
-Переменные: `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `APP_DB_SCHEMA`, `SPRING_DATASOURCE_USERNAME`, `SPRING_DATASOURCE_PASSWORD` — см. [`.env.example`](.env.example).
-
-## Swagger
-
-| URL | Описание |
-|-----|----------|
-| http://localhost:8080/swagger-ui.html | Swagger UI |
-| http://localhost:8080/api-docs | OpenAPI JSON |
-
-## API
-
-| Метод | URL | Описание |
-|-------|-----|----------|
-| POST | `/orders` | Создать заказ (stub) |
-
-## Liquibase
-
-- Master: [`src/main/resources/db/changelog/db.changelog-master.yaml`](src/main/resources/db/changelog/db.changelog-master.yaml)
-- Таблицы: [`src/main/resources/db/changelog/tables/`](src/main/resources/db/changelog/tables/) — по одному файлу на сущность
-
-### Схема (заказы)
-
-| Таблица | Описание |
-|---------|----------|
-| `orders` | Заказ: `id`, `status` (enum), `created_at` |
-| `detail` | Справочник деталей: `id`, `name` |
-| `tool` | Справочник инструментов: `id`, `name`, `assemble_duration` |
-| `order_detail` | Строки заказа: `(order_id, detail_id)`, `count` |
-| `order_tool` | Инструменты заказа: `(order_id, tool_id)`, `count` |
-
-`order_status`: `CREATED`, `PLANNED`, `COMPLETED`, `CANCELLED`
-
-## Тесты
+Остановка:
 
 ```bash
-mvn test
+docker-compose down
 ```
 
-Unit-тесты без PostgreSQL (Liquibase и DataSource отключены в test profile).
+Сброс БД (удалить volume и накатить миграции заново):
+
+```bash
+docker-compose down -v
+docker-compose up -d --build
+```
+
+Пересборка только API после изменений в коде:
+
+```bash
+docker-compose up -d --build api
+```
+
+### Если не стартует
+
+| Проблема | Решение |
+|----------|---------|
+| `relation already exists` / ошибки Liquibase | `docker-compose down -v` и поднять заново |
+| Порт 8080 занят | освободить порт или изменить mapping в `docker-compose.yml` |
+| `docker compose` не найден | использовать `docker-compose` |
+| API падает до готовности БД | подождать healthcheck postgres; `docker-compose ps` |
+
+## Разработка
+
+| Часть | Документация |
+|-------|--------------|
+| Backend (IDE, БД, локальный запуск) | [backend/README.md](backend/README.md) |
+| Frontend | (позже) |
