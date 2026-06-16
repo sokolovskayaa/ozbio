@@ -1,6 +1,5 @@
 package ru.ozbio.api;
 
-import java.time.Duration;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -49,12 +48,7 @@ class DetailControllerTest {
                                 1L,
                                 "Valve body",
                                 List.of(
-                                        new OperationResponse(
-                                                10L,
-                                                1,
-                                                Duration.ofMinutes(30),
-                                                Duration.ZERO,
-                                                1L))));
+                                        new OperationResponse(10L, 1, 30, 0, 1L))));
 
         mockMvc.perform(
                         post("/details")
@@ -64,7 +58,7 @@ class DetailControllerTest {
                                         {
                                           "name":"Valve body",
                                           "operations":[
-                                            {"duration":"PT30M","machineTypeId":1}
+                                            {"duration":30,"machineTypeId":1}
                                           ]
                                         }
                                         """))
@@ -82,12 +76,7 @@ class DetailControllerTest {
                                         1L,
                                         "Valve body",
                                         List.of(
-                                                new OperationResponse(
-                                                        10L,
-                                                        1,
-                                                        Duration.ofMinutes(30),
-                                                        Duration.ZERO,
-                                                        1L)))));
+                                                new OperationResponse(10L, 1, 30, 0, 1L)))));
 
         mockMvc.perform(get("/details"))
                 .andExpect(status().isOk())

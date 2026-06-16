@@ -5,6 +5,7 @@ import java.util.List;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -17,6 +18,7 @@ import ru.ozbio.api.dto.CreateOrderRequest;
 import ru.ozbio.api.dto.OrderResponse;
 import ru.ozbio.service.OrderService;
 
+@Order(5)
 @RestController
 @RequestMapping(path = "/orders", produces = MediaType.APPLICATION_JSON_VALUE)
 @Tag(name = "Orders", description = "Заказы")

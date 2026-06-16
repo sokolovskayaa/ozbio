@@ -65,8 +65,8 @@ public class DetailService {
                                         new OperationResponse(
                                                 operation.id(),
                                                 operation.step(),
-                                                operation.duration(),
-                                                operation.setupDuration(),
+                                                (int) operation.duration().toMinutes(),
+                                                (int) operation.setupDuration().toMinutes(),
                                                 operation.machineTypeId()))
                         .toList();
         return new DetailResponse(detail.id(), detail.name(), operationResponses);

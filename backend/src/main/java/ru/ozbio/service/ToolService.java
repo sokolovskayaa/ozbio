@@ -67,6 +67,7 @@ public class ToolService {
                 details.stream()
                         .map(detail -> new ToolDetailResponse(detail.detailId(), detail.detailName(), detail.count()))
                         .toList();
-        return new ToolResponse(tool.id(), tool.name(), tool.assembleDuration(), detailResponses);
+        return new ToolResponse(
+                tool.id(), tool.name(), (int) tool.assembleDuration().toMinutes(), detailResponses);
     }
 }

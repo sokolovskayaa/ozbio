@@ -1,6 +1,5 @@
 package ru.ozbio.api;
 
-import java.time.Duration;
 import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -48,7 +47,7 @@ class ToolControllerTest {
                         new ToolResponse(
                                 1L,
                                 "Drill",
-                                Duration.ofMinutes(45),
+                                45,
                                 List.of(new ToolDetailResponse(1L, "Body", 2))));
 
         mockMvc.perform(
@@ -58,7 +57,7 @@ class ToolControllerTest {
                                         """
                                         {
                                           "name":"Drill",
-                                          "assembleDuration":"PT45M",
+                                          "assembleDuration":45,
                                           "details":[{"detailId":1,"count":2}]
                                         }
                                         """))
@@ -75,7 +74,7 @@ class ToolControllerTest {
                                 new ToolResponse(
                                         1L,
                                         "Drill",
-                                        Duration.ofMinutes(45),
+                                        45,
                                         List.of(new ToolDetailResponse(1L, "Body", 2)))));
 
         mockMvc.perform(get("/tools"))

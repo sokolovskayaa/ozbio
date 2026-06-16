@@ -43,9 +43,7 @@ class ToolServiceTest {
         var response =
                 toolService.create(
                         new CreateToolRequest(
-                                "Drill",
-                                Duration.ofMinutes(45),
-                                List.of(new ToolDetailRequest(1L, 2))));
+                                "Drill", 45, List.of(new ToolDetailRequest(1L, 2))));
 
         assertThat(response.id()).isEqualTo(10L);
         assertThat(response.details()).hasSize(1);
@@ -60,9 +58,7 @@ class ToolServiceTest {
                         () ->
                                 toolService.create(
                                         new CreateToolRequest(
-                                                "Drill",
-                                                Duration.ofMinutes(45),
-                                                List.of(new ToolDetailRequest(99L, 1)))))
+                                                "Drill", 45, List.of(new ToolDetailRequest(99L, 1)))))
                 .isInstanceOf(InvalidReferenceException.class);
 
         verify(toolRepository, never()).insert(any());

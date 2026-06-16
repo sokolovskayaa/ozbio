@@ -4,9 +4,9 @@
 CREATE TABLE tool (
     id BIGSERIAL PRIMARY KEY,
     name TEXT NOT NULL,
-    assemble_duration INTERVAL NOT NULL
+    assemble_duration INT NOT NULL CHECK (assemble_duration >= 0)
 );
 COMMENT ON TABLE tool IS 'Справочник инструментов, собираемых из деталей';
 COMMENT ON COLUMN tool.id IS 'Уникальный идентификатор инструмента';
 COMMENT ON COLUMN tool.name IS 'Наименование инструмента';
-COMMENT ON COLUMN tool.assemble_duration IS 'Длительность сборки одной единицы инструмента';
+COMMENT ON COLUMN tool.assemble_duration IS 'Длительность сборки одной единицы инструмента, минуты';

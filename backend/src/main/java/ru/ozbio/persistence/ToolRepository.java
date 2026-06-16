@@ -20,8 +20,8 @@ public class ToolRepository {
     private static final String INSERT_TOOL =
             """
             INSERT INTO tool (name, assemble_duration)
-            VALUES (?, make_interval(secs => ?))
-            RETURNING id, name, EXTRACT(EPOCH FROM assemble_duration)::bigint AS assemble_duration_seconds
+            VALUES (?, ?)
+            RETURNING id, name, assemble_duration
             """;
 
     private static final String INSERT_TOOL_DETAIL =
@@ -49,7 +49,7 @@ public class ToolRepository {
 
     private static final String SELECT_ALL_TOOLS =
             """
-            SELECT id, name, EXTRACT(EPOCH FROM assemble_duration)::bigint AS assemble_duration_seconds
+            SELECT id, name, assemble_duration
             FROM tool
             ORDER BY id
             """;
@@ -68,9 +68,9 @@ public class ToolRepository {
                                 new ToolSummary(
                                         rs.getLong("id"),
                                         rs.getString("name"),
-                                        Duration.ofSeconds(rs.getLong("assemble_duration_seconds"))),
+                                        Duration.ofMinutes(rs.getInt("assemble_duration"))),
                         command.name(),
-                        command.assembleDuration().toSeconds());
+                        (int) command.assembleDuration().toMinutes());
 
         for (CreateToolCommand.Detail detail : command.details()) {
             jdbc.update(INSERT_TOOL_DETAIL, tool.id(), detail.detailId(), detail.count());
@@ -86,7 +86,7 @@ public class ToolRepository {
                         new ToolSummary(
                                 rs.getLong("id"),
                                 rs.getString("name"),
-                                Duration.ofSeconds(rs.getLong("assemble_duration_seconds"))));
+                                Duration.ofMinutes(rs.getInt("assemble_duration"))));
     }
 
     public List<ToolDetailLine> findDetailsByToolId(long toolId) {

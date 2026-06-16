@@ -29,7 +29,7 @@ public class DetailRepository {
     private static final String INSERT_OPERATION =
             """
             INSERT INTO operation (detail_id, duration, machine_type_id, step, setup_duration)
-            VALUES (?, make_interval(secs => ?), ?, ?, make_interval(secs => ?))
+            VALUES (?, ?, ?, ?, ?)
             RETURNING id, step, machine_type_id
             """;
 
@@ -38,8 +38,8 @@ public class DetailRepository {
             SELECT id,
                    step,
                    machine_type_id,
-                   EXTRACT(EPOCH FROM duration)::bigint AS duration_seconds,
-                   EXTRACT(EPOCH FROM setup_duration)::bigint AS setup_duration_seconds
+                   duration,
+                   setup_duration
             FROM operation
             WHERE detail_id = ?
             ORDER BY step
@@ -51,8 +51,8 @@ public class DetailRepository {
                    id,
                    step,
                    machine_type_id,
-                   EXTRACT(EPOCH FROM duration)::bigint AS duration_seconds,
-                   EXTRACT(EPOCH FROM setup_duration)::bigint AS setup_duration_seconds
+                   duration,
+                   setup_duration
             FROM operation
             WHERE detail_id IN (
             """;
@@ -62,8 +62,8 @@ public class DetailRepository {
             SELECT id,
                    step,
                    machine_type_id,
-                   EXTRACT(EPOCH FROM duration)::bigint AS duration_seconds,
-                   EXTRACT(EPOCH FROM setup_duration)::bigint AS setup_duration_seconds
+                   duration,
+                   setup_duration
             FROM operation
             WHERE id IN (
             """;
@@ -92,10 +92,10 @@ public class DetailRepository {
             jdbc.update(
                     INSERT_OPERATION,
                     detail.id(),
-                    operation.duration().toSeconds(),
+                    (int) operation.duration().toMinutes(),
                     operation.machineTypeId(),
                     operation.step(),
-                    operation.setupDuration().toSeconds());
+                    (int) operation.setupDuration().toMinutes());
         }
 
         return detail;
@@ -174,8 +174,8 @@ public class DetailRepository {
         return new OperationLine(
                 rs.getLong("id"),
                 rs.getInt("step"),
-                Duration.ofSeconds(rs.getLong("duration_seconds")),
-                Duration.ofSeconds(rs.getLong("setup_duration_seconds")),
+                Duration.ofMinutes(rs.getInt("duration")),
+                Duration.ofMinutes(rs.getInt("setup_duration")),
                 rs.getLong("machine_type_id"));
     }
 }

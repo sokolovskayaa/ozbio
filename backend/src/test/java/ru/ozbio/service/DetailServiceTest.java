@@ -49,8 +49,7 @@ class DetailServiceTest {
                         new CreateDetailRequest(
                                 "Valve body",
                                 List.of(
-                                        new OperationRequest(
-                                                Duration.ofMinutes(30), 1L, Duration.ZERO))));
+                                        new OperationRequest(30, 1L, 0))));
 
         assertThat(response.id()).isEqualTo(10L);
         assertThat(response.name()).isEqualTo("Valve body");
@@ -69,8 +68,8 @@ class DetailServiceTest {
                 new CreateDetailRequest(
                         "Valve body",
                         List.of(
-                                new OperationRequest(Duration.ofMinutes(30), 1L, Duration.ZERO),
-                                new OperationRequest(Duration.ofMinutes(20), 1L, Duration.ZERO)));
+                                new OperationRequest(30, 1L, 0),
+                                new OperationRequest(20, 1L, 0)));
         detailService.create(request);
 
         ArgumentCaptor<CreateDetailCommand> captor = ArgumentCaptor.forClass(CreateDetailCommand.class);
@@ -93,10 +92,7 @@ class DetailServiceTest {
                                         new CreateDetailRequest(
                                                 "Valve body",
                                                 List.of(
-                                                        new OperationRequest(
-                                                                Duration.ofMinutes(30),
-                                                                99L,
-                                                                Duration.ZERO)))))
+                                                        new OperationRequest(30, 99L, 0)))))
                 .isInstanceOf(InvalidReferenceException.class);
 
         verify(detailRepository, never()).insert(any());

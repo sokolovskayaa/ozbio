@@ -1,0 +1,181 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="fb8c6d67-baea-4af7-adfb-915c16c57f19" name="Changes" comment="feat: get current schedule endpoint">
+      <change beforePath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/api/dto/CreateDetailRequest.java" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/api/dto/CreateDetailRequest.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/api/dto/CreateToolRequest.java" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/api/dto/CreateToolRequest.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/api/dto/OperationRequest.java" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/api/dto/OperationRequest.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/api/dto/OperationResponse.java" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/api/dto/OperationResponse.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/api/dto/ToolResponse.java" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/api/dto/ToolResponse.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/persistence/DetailRepository.java" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/persistence/DetailRepository.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/persistence/ToolRepository.java" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/persistence/ToolRepository.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/service/DetailService.java" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/service/DetailService.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/service/ToolService.java" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/main/java/ru/ozbio/service/ToolService.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/main/resources/db/changelog/db.changelog-master.xml" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/main/resources/db/changelog/db.changelog-master.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/main/resources/db/changelog/tables/002-tool.sql" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/main/resources/db/changelog/tables/002-tool.sql" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/main/resources/db/changelog/tables/009-operation.sql" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/main/resources/db/changelog/tables/009-operation.sql" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/test/java/ru/ozbio/api/DetailControllerTest.java" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/test/java/ru/ozbio/api/DetailControllerTest.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/test/java/ru/ozbio/api/ToolControllerTest.java" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/test/java/ru/ozbio/api/ToolControllerTest.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/test/java/ru/ozbio/service/DetailServiceTest.java" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/test/java/ru/ozbio/service/DetailServiceTest.java" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/backend/src/test/java/ru/ozbio/service/ToolServiceTest.java" beforeDir="false" afterPath="$PROJECT_DIR$/backend/src/test/java/ru/ozbio/service/ToolServiceTest.java" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Class" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;sokolovskayaa&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/sokolovskayaa/ozbio.git&quot;,
+    &quot;accountId&quot;: &quot;37da178e-2886-41e6-91e6-8a61ae339cac&quot;
+  }
+}</component>
+  <component name="ProblemsViewState">
+    <option name="selectedTabId" value="CurrentFile" />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 6
+}</component>
+  <component name="ProjectId" id="3E5tjYJ04vlNCeNcHIoWvLdoyYu" />
+  <component name="ProjectLevelVcsManager" settingsEditedManually="true" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "Application.Main.executor": "Run",
+    "Application.OzbioApplication.executor": "Run",
+    "Application.SchedulerApplication.executor": "Run",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.git.unshallow": "true",
+    "git-widget-placeholder": "main",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "/Users/gram3r/IdeaProjects/ozbio",
+    "project.structure.last.edited": "SDKs",
+    "project.structure.proportion": "0.15",
+    "project.structure.side.proportion": "0.2",
+    "settings.editor.selected.configurable": "preferences.lookFeel"
+  }
+}]]></component>
+  <component name="RunManager" selected="Application.OzbioApplication">
+    <configuration name="Main" type="Application" factoryName="Application" temporary="true" nameIsGenerated="true">
+      <option name="MAIN_CLASS_NAME" value="scheduler.Main" />
+      <module name="ozbio" />
+      <extension name="coverage">
+        <pattern>
+          <option name="PATTERN" value="scheduler.*" />
+          <option name="ENABLED" value="true" />
+        </pattern>
+      </extension>
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="OzbioApplication" type="Application" factoryName="Application" temporary="true" nameIsGenerated="true">
+      <option name="MAIN_CLASS_NAME" value="ru.ozbio.OzbioApplication" />
+      <module name="ozbio" />
+      <extension name="coverage">
+        <pattern>
+          <option name="PATTERN" value="ru.ozbio.*" />
+          <option name="ENABLED" value="true" />
+        </pattern>
+      </extension>
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <configuration name="SchedulerApplication" type="Application" factoryName="Application" temporary="true" nameIsGenerated="true">
+      <option name="MAIN_CLASS_NAME" value="scheduler.SchedulerApplication" />
+      <module name="ozbio" />
+      <extension name="coverage">
+        <pattern>
+          <option name="PATTERN" value="scheduler.*" />
+          <option name="ENABLED" value="true" />
+        </pattern>
+      </extension>
+      <method v="2">
+        <option name="Make" enabled="true" />
+      </method>
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Application.OzbioApplication" />
+        <item itemvalue="Application.SchedulerApplication" />
+        <item itemvalue="Application.Main" />
+      </list>
+    </recent_temporary>
+  </component>
+  <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="fb8c6d67-baea-4af7-adfb-915c16c57f19" name="Changes" comment="" />
+      <created>1779480396899</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1779480396899</updated>
+    </task>
+    <task id="LOCAL-00001" summary="added crud for tables (orders,tools,details,machines)">
+      <option name="closed" value="true" />
+      <created>1781561190659</created>
+      <option name="number" value="00001" />
+      <option name="presentableId" value="LOCAL-00001" />
+      <option name="project" value="LOCAL" />
+      <updated>1781561190659</updated>
+    </task>
+    <task id="LOCAL-00002" summary="add: start planning logic">
+      <option name="closed" value="true" />
+      <created>1781564776538</created>
+      <option name="number" value="00002" />
+      <option name="presentableId" value="LOCAL-00002" />
+      <option name="project" value="LOCAL" />
+      <updated>1781564776538</updated>
+    </task>
+    <task id="LOCAL-00003" summary="refactor: changed project structure">
+      <option name="closed" value="true" />
+      <created>1781627579241</created>
+      <option name="number" value="00003" />
+      <option name="presentableId" value="LOCAL-00003" />
+      <option name="project" value="LOCAL" />
+      <updated>1781627579241</updated>
+    </task>
+    <task id="LOCAL-00004" summary="feat: get current schedule endpoint">
+      <option name="closed" value="true" />
+      <created>1781629325458</created>
+      <option name="number" value="00004" />
+      <option name="presentableId" value="LOCAL-00004" />
+      <option name="project" value="LOCAL" />
+      <updated>1781629325459</updated>
+    </task>
+    <option name="localTasksCounter" value="5" />
+    <servers />
+  </component>
+  <component name="VcsManagerConfiguration">
+    <MESSAGE value="added crud for tables (orders,tools,details,machines)" />
+    <MESSAGE value="add: starting planning logic" />
+    <MESSAGE value="add: start planning logic" />
+    <MESSAGE value="refactor: changed project structure" />
+    <MESSAGE value="feat: get current schedule endpoint" />
+    <option name="LAST_COMMIT_MESSAGE" value="feat: get current schedule endpoint" />
+    <option name="OPTIMIZE_IMPORTS_BEFORE_PROJECT_COMMIT" value="true" />
+  </component>
+</project>

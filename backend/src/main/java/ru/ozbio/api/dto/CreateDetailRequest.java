@@ -1,5 +1,6 @@
 package ru.ozbio.api.dto;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -18,8 +19,8 @@ public record CreateDetailRequest(
             mappedOperations.add(
                     new CreateDetailCommand.Operation(
                             step++,
-                            operation.duration(),
-                            operation.setupDuration(),
+                            Duration.ofMinutes(operation.duration()),
+                            Duration.ofMinutes(operation.setupDuration()),
                             operation.machineTypeId()));
         }
         return new CreateDetailCommand(name.trim(), mappedOperations);
