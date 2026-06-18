@@ -17,5 +17,8 @@
     <include file="tables/009-operation.sql" relativeToChangelogFile="true"/>
     <include file="tables/010-storage.sql" relativeToChangelogFile="true"/>
     <include file="tables/011-shift-type.sql" relativeToChangelogFile="true"/>
+    <include file="tables/012-machine-shift-type.sql" relativeToChangelogFile="true"/>
+    <include file="tables/013-machine-shift.sql" relativeToChangelogFile="true"/>
+    <include file="tables/014-shift-completion.sql" relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

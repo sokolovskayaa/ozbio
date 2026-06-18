@@ -18,7 +18,7 @@ import ru.ozbio.api.dto.CreateOrderRequest;
 import ru.ozbio.api.dto.OrderResponse;
 import ru.ozbio.service.OrderService;
 
-@Order(5)
+@Order(6)
 @RestController
 @RequestMapping(path = "/orders", produces = MediaType.APPLICATION_JSON_VALUE)
 @Tag(name = "Orders", description = "Заказы")
