@@ -27,8 +27,7 @@ class ShiftServiceTest {
 
     @Test
     void create_persistsShiftType() {
-        when(shiftRepository.insert(
-                        new CreateShiftTypeCommand(1, LocalTime.of(8, 0), LocalTime.of(16, 0))))
+        when(shiftRepository.insert(new CreateShiftTypeCommand(1, LocalTime.of(8, 0), LocalTime.of(16, 0))))
                 .thenReturn(new ShiftTypeSummary(1L, 1, LocalTime.of(8, 0), LocalTime.of(16, 0)));
 
         var response =

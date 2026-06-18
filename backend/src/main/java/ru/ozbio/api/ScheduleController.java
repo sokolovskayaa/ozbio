@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 import ru.ozbio.api.dto.ScheduleItemResponse;
 import ru.ozbio.service.ScheduleService;
 
-@Order(6)
+@Order(7)
 @RestController
 @RequestMapping(path = "/schedule", produces = MediaType.APPLICATION_JSON_VALUE)
 @Tag(name = "Schedule", description = "Расписание производства")

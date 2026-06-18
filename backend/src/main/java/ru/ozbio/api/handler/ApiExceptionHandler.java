@@ -12,6 +12,9 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import ru.ozbio.engine.exception.NoMachineAvailableException;
 import ru.ozbio.service.exception.InvalidReferenceException;
+import ru.ozbio.service.exception.OperationMachineTypeMismatchException;
+import ru.ozbio.service.exception.ResourceNotFoundException;
+import ru.ozbio.service.exception.ShiftAlreadyClosedException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -45,6 +48,33 @@ public class ApiExceptionHandler {
                 problemDetail(HttpStatus.BAD_REQUEST, "Invalid reference", ex.getMessage());
         detail.setProperty("field", ex.field());
         detail.setProperty("id", ex.id());
+        return detail;
+    }
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    ProblemDetail handleResourceNotFound(ResourceNotFoundException ex) {
+        ProblemDetail detail = problemDetail(HttpStatus.NOT_FOUND, "Not found", ex.getMessage());
+        detail.setProperty("field", ex.field());
+        detail.setProperty("id", ex.id());
+        return detail;
+    }
+
+    @ExceptionHandler(ShiftAlreadyClosedException.class)
+    ProblemDetail handleShiftAlreadyClosed(ShiftAlreadyClosedException ex) {
+        ProblemDetail detail =
+                problemDetail(HttpStatus.CONFLICT, "Shift already closed", ex.getMessage());
+        detail.setProperty("machineShiftId", ex.machineShiftId());
+        return detail;
+    }
+
+    @ExceptionHandler(OperationMachineTypeMismatchException.class)
+    ProblemDetail handleOperationMachineTypeMismatch(OperationMachineTypeMismatchException ex) {
+        ProblemDetail detail =
+                problemDetail(HttpStatus.BAD_REQUEST, "Operation machine type mismatch", ex.getMessage());
+        detail.setProperty("operationId", ex.operationId());
+        detail.setProperty("machineId", ex.machineId());
+        detail.setProperty("machineTypeId", ex.machineTypeId());
+        detail.setProperty("operationMachineTypeId", ex.operationMachineTypeId());
         return detail;
     }
 

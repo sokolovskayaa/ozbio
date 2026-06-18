@@ -27,6 +27,7 @@ public class OpenApiConfig {
                                 new Tag().name("Details").description("Детали"),
                                 new Tag().name("Tools").description("Инструменты"),
                                 new Tag().name("Shifts").description("Смены"),
+                                new Tag().name("Machine shifts").description("Экземпляры смен на станках"),
                                 new Tag().name("Orders").description("Заказы"),
                                 new Tag().name("Schedule").description("Расписание производства")));
     }

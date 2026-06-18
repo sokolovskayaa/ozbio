@@ -12,6 +12,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import ru.ozbio.api.dto.ShiftTypeResponse;
 import ru.ozbio.api.handler.ApiExceptionHandler;
+import ru.ozbio.service.MachineShiftService;
 import ru.ozbio.service.ShiftService;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -28,12 +29,15 @@ class ShiftControllerTest {
     @Mock
     ShiftService shiftService;
 
+    @Mock
+    MachineShiftService machineShiftService;
+
     MockMvc mockMvc;
 
     @BeforeEach
     void setUp() {
         mockMvc =
-                MockMvcBuilders.standaloneSetup(new ShiftController(shiftService))
+                MockMvcBuilders.standaloneSetup(new ShiftController(shiftService, machineShiftService))
                         .setControllerAdvice(new ApiExceptionHandler())
                         .build();
     }
@@ -66,5 +70,18 @@ class ShiftControllerTest {
         doNothing().when(shiftService).delete(1L);
 
         mockMvc.perform(delete("/shifts/1")).andExpect(status().isNoContent());
+    }
+
+    @Test
+    void linkMachines_returnsNoContent() throws Exception {
+        doNothing().when(machineShiftService).linkMachines(any(Long.class), any());
+
+        mockMvc.perform(
+                        post("/shifts/1/machines")
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content("""
+                                        {"machineIds":[1,2]}
+                                        """))
+                .andExpect(status().isNoContent());
     }
 }

@@ -28,9 +28,6 @@ public class ShiftService {
 
     private static ShiftTypeResponse toResponse(ShiftTypeSummary shiftType) {
         return new ShiftTypeResponse(
-                shiftType.id(),
-                shiftType.dayOfWeek(),
-                shiftType.startTime(),
-                shiftType.endTime());
+                shiftType.id(), shiftType.dayOfWeek(), shiftType.startTime(), shiftType.endTime());
     }
 }
