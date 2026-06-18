@@ -2,12 +2,7 @@ target/
 out/
 
 # IntelliJ IDEA — локальное не коммитим
-.idea/workspace.xml
-.idea/yatool.xml
-.idea/shelf/
-.idea/httpRequests/
-.idea/dataSources/
-.idea/dataSources.local.xml
+.idea
 
 .DS_Store
 .env
